@@ -1,0 +1,16 @@
+ask:
+  fields:
+    text:
+      required: true
+      example: "What is on my calendar today?"
+      selector:
+        text:
+          multiline: true
+    session_id:
+      example: "morning-briefing"
+      selector:
+        text:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: hermes_assist

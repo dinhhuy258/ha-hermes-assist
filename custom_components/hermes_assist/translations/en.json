@@ -1,0 +1,107 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Hermes Agent",
+        "description": "Enter the address of the Hermes Agent API server and its API key.",
+        "data": {
+          "url": "URL",
+          "api_key": "API key"
+        },
+        "data_description": {
+          "url": "Base URL of the Hermes API server, for example https://hermes.example.com. A trailing /v1 is removed.",
+          "api_key": "The value of API_SERVER_KEY on the Hermes server."
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Hermes Agent",
+        "description": "Change the address of the Hermes API server or its API key.",
+        "data": {
+          "url": "URL",
+          "api_key": "API key"
+        },
+        "data_description": {
+          "url": "Base URL of the Hermes API server.",
+          "api_key": "Leave empty to keep the current key."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Hermes Agent",
+        "description": "Hermes at {url} rejected the API key. Enter the current key.",
+        "data": {
+          "api_key": "API key"
+        },
+        "data_description": {
+          "api_key": "The value of API_SERVER_KEY on the Hermes server."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Hermes.",
+      "invalid_auth": "Hermes rejected the API key.",
+      "invalid_url": "The URL must start with http:// or https:// and include a host name.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This Hermes server is already configured.",
+      "reauth_successful": "The API key was updated.",
+      "reconfigure_successful": "The connection settings were updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Hermes Assist options",
+        "data": {
+          "prompt": "Prompt",
+          "model": "Model",
+          "session_key": "Session key",
+          "session_mode": "Session mode",
+          "session_idle_timeout": "Session idle timeout",
+          "reset_phrases": "Reset phrases",
+          "handoff_after": "Hand off after",
+          "timeout": "Timeout"
+        },
+        "data_description": {
+          "prompt": "System prompt sent with every voice request. Device, area and language context is added after it.",
+          "model": "Model name sent to Hermes. Leave empty to use the Hermes default.",
+          "session_key": "Sent as X-Hermes-Session-Key to select the Hermes memory scope. Leave empty to send no key.",
+          "session_mode": "How long a Hermes session continues across requests.",
+          "session_idle_timeout": "In idle mode, start a new session after this many seconds without a request.",
+          "reset_phrases": "Comma-separated phrases that start a new Hermes session, for example: start over, new conversation.",
+          "handoff_after": "Seconds to wait for the first words of the answer before the satellite says it is working on it. 0 disables the hand-off.",
+          "timeout": "Maximum time for one request, including a handed-off request."
+        }
+      }
+    }
+  },
+  "selector": {
+    "session_mode": {
+      "options": {
+        "keep": "Keep one session",
+        "idle": "New session after idle time",
+        "per_conversation": "One session per conversation"
+      }
+    }
+  },
+  "services": {
+    "ask": {
+      "name": "Ask",
+      "description": "Sends text to Hermes and returns the whole answer. Does not stream and does not hand off.",
+      "fields": {
+        "text": {
+          "name": "Text",
+          "description": "The request for Hermes."
+        },
+        "session_id": {
+          "name": "Session ID",
+          "description": "Hermes session to use for this call only. The stored session is left unchanged."
+        },
+        "config_entry_id": {
+          "name": "Hermes server",
+          "description": "Required only when more than one Hermes Assist entry is set up."
+        }
+      }
+    }
+  }
+}

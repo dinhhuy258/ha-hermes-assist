@@ -1,0 +1,14 @@
+# Pins Home Assistant 2026.9.4 and the pytest plugins it is tested with.
+pytest-homeassistant-custom-component==0.13.367
+
+# Requirements of the core components that the manifest dependencies load
+# (conversation, assist_pipeline, tts, ffmpeg), as pinned by Home Assistant 2026.9.4.
+gazetteer-matcher==1.1.0
+ha-ffmpeg==3.2.2
+hassil==3.12.1
+home-assistant-intents==2026.8.28
+mutagen==1.48.1
+pymicro-vad==1.0.1
+pyspeex-noise==1.0.2
+
+ruff==0.16.10

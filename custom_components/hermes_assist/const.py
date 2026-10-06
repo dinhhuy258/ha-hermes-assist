@@ -1,0 +1,83 @@
+"""Constants for the Hermes Assist integration."""
+
+from typing import Any, Final
+
+DOMAIN: Final = "hermes_assist"
+NAME: Final = "Hermes Assist"
+
+CONF_URL: Final = "url"
+CONF_API_KEY: Final = "api_key"
+CONF_PROMPT: Final = "prompt"
+CONF_MODEL: Final = "model"
+CONF_SESSION_KEY: Final = "session_key"
+CONF_SESSION_MODE: Final = "session_mode"
+CONF_SESSION_IDLE_TIMEOUT: Final = "session_idle_timeout"
+CONF_RESET_PHRASES: Final = "reset_phrases"
+CONF_HANDOFF_AFTER: Final = "handoff_after"
+CONF_TIMEOUT: Final = "timeout"
+
+SESSION_MODE_KEEP: Final = "keep"
+SESSION_MODE_IDLE: Final = "idle"
+SESSION_MODE_PER_CONVERSATION: Final = "per_conversation"
+SESSION_MODES: Final = [
+    SESSION_MODE_KEEP,
+    SESSION_MODE_IDLE,
+    SESSION_MODE_PER_CONVERSATION,
+]
+
+DEFAULT_PROMPT: Final = (
+    "You are a voice assistant that answers through a smart speaker. "
+    "Reply in one to three short spoken sentences. "
+    "Do not use markdown, lists, code, URLs, emoji or tables. "
+    "End with a question only when you need an answer from the user. "
+    "Do not describe what you are about to do before using a tool; "
+    "use the tool and then answer."
+)
+DEFAULT_MODEL: Final = ""
+DEFAULT_SESSION_KEY: Final = "homeassistant:assist"
+DEFAULT_SESSION_MODE: Final = SESSION_MODE_IDLE
+DEFAULT_SESSION_IDLE_TIMEOUT: Final = 1800
+DEFAULT_RESET_PHRASES: Final = "start over, new conversation, reset conversation"
+DEFAULT_HANDOFF_AFTER: Final = 15
+DEFAULT_TIMEOUT: Final = 600
+
+MIN_SESSION_IDLE_TIMEOUT: Final = 60
+MAX_SESSION_IDLE_TIMEOUT: Final = 86400
+MIN_HANDOFF_AFTER: Final = 0
+MAX_HANDOFF_AFTER: Final = 29
+MIN_TIMEOUT: Final = 5
+MAX_TIMEOUT: Final = 1800
+TIMEOUT_STEP: Final = 5
+
+DEFAULT_OPTIONS: Final[dict[str, Any]] = {
+    CONF_PROMPT: DEFAULT_PROMPT,
+    CONF_MODEL: DEFAULT_MODEL,
+    CONF_SESSION_KEY: DEFAULT_SESSION_KEY,
+    CONF_SESSION_MODE: DEFAULT_SESSION_MODE,
+    CONF_SESSION_IDLE_TIMEOUT: DEFAULT_SESSION_IDLE_TIMEOUT,
+    CONF_RESET_PHRASES: DEFAULT_RESET_PHRASES,
+    CONF_HANDOFF_AFTER: DEFAULT_HANDOFF_AFTER,
+    CONF_TIMEOUT: DEFAULT_TIMEOUT,
+}
+
+STORAGE_VERSION: Final = 1
+STORAGE_SAVE_DELAY: Final = 1
+MAX_PER_CONVERSATION_SESSIONS: Final = 50
+MAX_SESSION_ID_LENGTH: Final = 128
+SATELLITE_IDLE_TIMEOUT: Final = 60
+VALIDATE_TIMEOUT: Final = 10
+CONNECT_TIMEOUT: Final = 10
+
+SERVICE_ASK: Final = "ask"
+ATTR_TEXT: Final = "text"
+ATTR_SESSION_ID: Final = "session_id"
+ATTR_CONFIG_ENTRY_ID: Final = "config_entry_id"
+
+HANDOFF_MESSAGE: Final = "I'm working on that. I'll let you know when it's done."
+RESET_MESSAGE: Final = "Okay, starting a new conversation."
+ERROR_CANNOT_CONNECT: Final = "Sorry, I couldn't reach Hermes in time."
+ERROR_AUTH: Final = "Hermes rejected the API key."
+ERROR_GENERIC: Final = "Sorry, Hermes had a problem."
+ERROR_EMPTY: Final = "Sorry, Hermes didn't answer."
+ERROR_TOO_LONG: Final = "Sorry, Hermes took too long."
+NOTIFICATION_TITLE: Final = NAME

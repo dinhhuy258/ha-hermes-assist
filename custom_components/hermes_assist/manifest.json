@@ -1,0 +1,13 @@
+{
+  "domain": "hermes_assist",
+  "name": "Hermes Assist",
+  "codeowners": ["@dinhhuy258"],
+  "config_flow": true,
+  "dependencies": ["conversation", "assist_satellite"],
+  "documentation": "https://github.com/dinhhuy258/ha-hermes-assist",
+  "integration_type": "service",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/dinhhuy258/ha-hermes-assist/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
