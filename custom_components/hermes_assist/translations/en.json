@@ -9,7 +9,7 @@
           "api_key": "API key"
         },
         "data_description": {
-          "url": "Base URL of the Hermes API server, for example https://hermes.example.com. A trailing /v1 is removed.",
+          "url": "Base URL of the Hermes API server, without a trailing /v1.",
           "api_key": "The value of API_SERVER_KEY on the Hermes server."
         }
       },
