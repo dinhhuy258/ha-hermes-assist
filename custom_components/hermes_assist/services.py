@@ -32,11 +32,13 @@ from .const import (
     DEFAULT_SESSION_KEY,
     DEFAULT_TIMEOUT,
     DOMAIN,
+    SERVICE_ASK,
+)
+from .messages import (
     ERROR_AUTH,
     ERROR_CANNOT_CONNECT,
     ERROR_GENERIC,
     ERROR_TOO_LONG,
-    SERVICE_ASK,
 )
 
 if TYPE_CHECKING:

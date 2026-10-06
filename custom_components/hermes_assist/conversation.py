@@ -32,11 +32,13 @@ from .const import (
     CONF_SESSION_KEY,
     CONF_TIMEOUT,
     DEFAULT_HANDOFF_AFTER,
-    DEFAULT_PROMPT,
     DEFAULT_RESET_PHRASES,
     DEFAULT_SESSION_KEY,
     DEFAULT_TIMEOUT,
     DOMAIN,
+    SATELLITE_IDLE_TIMEOUT,
+)
+from .messages import (
     ERROR_AUTH,
     ERROR_CANNOT_CONNECT,
     ERROR_EMPTY,
@@ -45,7 +47,9 @@ from .const import (
     HANDOFF_MESSAGE,
     NOTIFICATION_TITLE,
     RESET_MESSAGE,
-    SATELLITE_IDLE_TIMEOUT,
+)
+from .prompts import (
+    DEFAULT_PROMPT,
 )
 
 _LOGGER = logging.getLogger(__name__)

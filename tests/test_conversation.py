@@ -33,8 +33,11 @@ from custom_components.hermes_assist.const import (
     CONF_MODEL,
     CONF_SESSION_MODE,
     CONF_TIMEOUT,
-    DEFAULT_PROMPT,
     DOMAIN,
+    SERVICE_ASK,
+    SESSION_MODE_PER_CONVERSATION,
+)
+from custom_components.hermes_assist.messages import (
     ERROR_AUTH,
     ERROR_CANNOT_CONNECT,
     ERROR_EMPTY,
@@ -43,8 +46,9 @@ from custom_components.hermes_assist.const import (
     HANDOFF_MESSAGE,
     NOTIFICATION_TITLE,
     RESET_MESSAGE,
-    SERVICE_ASK,
-    SESSION_MODE_PER_CONVERSATION,
+)
+from custom_components.hermes_assist.prompts import (
+    DEFAULT_PROMPT,
 )
 
 from .conftest import ENTITY_ID, FakeHermes, set_options
