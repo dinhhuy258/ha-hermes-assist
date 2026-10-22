@@ -1,13 +1,14 @@
 """Conversation agent that streams Hermes Agent answers into Assist."""
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 import logging
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from homeassistant.components import conversation, persistent_notification
 from homeassistant.components.assist_satellite import AssistSatelliteEntityFeature
+from homeassistant.config_entries import ConfigSubentry
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     ATTR_SUPPORTED_FEATURES,
@@ -22,7 +23,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 
-from . import HermesAssistConfigEntry
+from . import HermesAssistConfigEntry, conversation_subentries
 from .api import HermesAuthError, HermesConnectionError, HermesError, HermesTimeoutError
 from .const import (
     CONF_HANDOFF_AFTER,
@@ -51,6 +52,7 @@ from .messages import (
 from .prompts import (
     DEFAULT_PROMPT,
 )
+from .session import SessionStore
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,8 +73,12 @@ async def async_setup_entry(
     entry: HermesAssistConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Add the Hermes conversation entity."""
-    async_add_entities([HermesAssistEntity(entry)])
+    """Add one conversation entity per agent subentry."""
+    for subentry in conversation_subentries(entry):
+        async_add_entities(
+            [HermesAssistEntity(entry, subentry)],
+            config_subentry_id=subentry.subentry_id,
+        )
 
 
 class _SymbolStripper:
@@ -133,13 +139,16 @@ class HermesAssistEntity(
     _attr_name = None
     _attr_supports_streaming = True
 
-    def __init__(self, entry: HermesAssistConfigEntry) -> None:
-        """Initialize the agent."""
+    def __init__(
+        self, entry: HermesAssistConfigEntry, subentry: ConfigSubentry
+    ) -> None:
+        """Initialize the agent of one subentry."""
         self.entry = entry
-        self._attr_unique_id = entry.entry_id
+        self.subentry = subentry
+        self._attr_unique_id = subentry.subentry_id
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
+            identifiers={(DOMAIN, subentry.subentry_id)},
+            name=subentry.title,
             manufacturer="Nous Research",
             model="Hermes Agent",
             entry_type=DeviceEntryType.SERVICE,
@@ -147,6 +156,16 @@ class HermesAssistEntity(
         # Satellite entity id -> (question delivered late, its conversation id).
         self._follow_ups: dict[str, tuple[str, str]] = {}
         self._warned_missing_session = False
+
+    @property
+    def _options(self) -> Mapping[str, Any]:
+        """Return the options of this agent."""
+        return self.subentry.data
+
+    @property
+    def _store(self) -> SessionStore:
+        """Return the session store of this agent."""
+        return self.entry.runtime_data.stores[self.subentry.subentry_id]
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
@@ -169,13 +188,12 @@ class HermesAssistEntity(
         chat_log: conversation.ChatLog,
     ) -> conversation.ConversationResult:
         """Stream the Hermes answer, or hand it off when the first delta is late."""
-        data = self.entry.runtime_data
-        options = self.entry.options
+        options = self._options
         conversation_id = chat_log.conversation_id
 
         reset_phrases = options.get(CONF_RESET_PHRASES, DEFAULT_RESET_PHRASES)
         if _is_reset(user_input.text, reset_phrases):
-            data.store.reset(conversation_id)
+            self._store.reset(conversation_id)
             if user_input.satellite_id:
                 self._follow_ups.pop(user_input.satellite_id, None)
             return self._reply(user_input, chat_log, RESET_MESSAGE)
@@ -189,7 +207,7 @@ class HermesAssistEntity(
             self.hass,
             self._async_produce(
                 self._messages(user_input),
-                data.store.get(conversation_id),
+                self._store.get(conversation_id),
                 conversation_id,
                 queue,
             ),
@@ -213,7 +231,7 @@ class HermesAssistEntity(
             producer.cancel()
             raise
 
-        data.store.touch(conversation_id)
+        self._store.touch(conversation_id)
         last = chat_log.content[-1]
         if not isinstance(last, conversation.AssistantContent) or not last.content:
             return self._error(user_input, chat_log, ERROR_EMPTY)
@@ -232,7 +250,7 @@ class HermesAssistEntity(
     def _build_prompt(self, user_input: conversation.ConversationInput) -> str:
         """Combine the configured prompt with the context of this turn."""
         parts = [
-            self.entry.options.get(CONF_PROMPT, DEFAULT_PROMPT),
+            self._options.get(CONF_PROMPT, DEFAULT_PROMPT),
             self._device_context(user_input),
         ]
         if user_input.language and user_input.language != MATCH_ALL:
@@ -277,7 +295,7 @@ class HermesAssistEntity(
         question, previous_id = follow_up
         if user_input.extra_system_prompt != question or previous_id == conversation_id:
             return
-        store = self.entry.runtime_data.store
+        store = self._store
         if (session_id := store.get(previous_id)) is not None:
             store.set(conversation_id, session_id)
 
@@ -289,10 +307,9 @@ class HermesAssistEntity(
         queue: asyncio.Queue[object],
     ) -> None:
         """Read the Hermes stream into the queue, ending with _DONE or an error."""
-        data = self.entry.runtime_data
-        options = self.entry.options
+        options = self._options
         try:
-            async with data.client.stream_chat(
+            async with self.entry.runtime_data.client.stream_chat(
                 messages,
                 model=options.get(CONF_MODEL) or None,
                 session_key=options.get(CONF_SESSION_KEY, DEFAULT_SESSION_KEY) or None,
@@ -320,7 +337,7 @@ class HermesAssistEntity(
                     "every request will start a new Hermes session"
                 )
             return
-        self.entry.runtime_data.store.set(conversation_id, session_id)
+        self._store.set(conversation_id, session_id)
 
     async def _async_stream(
         self,
@@ -383,7 +400,7 @@ class HermesAssistEntity(
             message = ERROR_TOO_LONG
         else:
             message = self._late_message(text, error)
-        self.entry.runtime_data.store.touch(conversation_id)
+        self._store.touch(conversation_id)
         await self._async_deliver(satellite_id, conversation_id, message)
 
     def _late_message(self, text: str, error: HermesError | None) -> str:

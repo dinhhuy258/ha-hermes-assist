@@ -10,7 +10,9 @@ ask:
       example: "morning-briefing"
       selector:
         text:
-    config_entry_id:
+    agent_id:
+      example: conversation.hermes_assist
       selector:
-        config_entry:
+        entity:
           integration: hermes_assist
+          domain: conversation

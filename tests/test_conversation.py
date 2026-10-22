@@ -2,12 +2,13 @@
 
 import asyncio
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 from unittest.mock import patch
 
 from homeassistant.components import conversation
 from homeassistant.components.assist_satellite import AssistSatelliteEntityFeature
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigSubentry
 from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import area_registry as ar, device_registry as dr, intent
@@ -26,16 +27,19 @@ from custom_components.hermes_assist.api import (
     HermesStreamError,
 )
 from custom_components.hermes_assist.const import (
-    ATTR_CONFIG_ENTRY_ID,
+    ATTR_AGENT_ID,
     ATTR_SESSION_ID,
     ATTR_TEXT,
     CONF_HANDOFF_AFTER,
     CONF_MODEL,
+    CONF_PROMPT,
     CONF_SESSION_MODE,
     CONF_TIMEOUT,
+    DEFAULT_OPTIONS,
     DOMAIN,
     SERVICE_ASK,
     SESSION_MODE_PER_CONVERSATION,
+    SUBENTRY_TYPE_CONVERSATION,
 )
 from custom_components.hermes_assist.messages import (
     ERROR_AUTH,
@@ -51,7 +55,7 @@ from custom_components.hermes_assist.prompts import (
     DEFAULT_PROMPT,
 )
 
-from .conftest import ENTITY_ID, FakeHermes, set_options
+from .conftest import ENTITY_ID, SUBENTRY_ID, FakeHermes, set_options
 
 SATELLITE = "assist_satellite.kitchen"
 ANNOUNCE = AssistSatelliteEntityFeature.ANNOUNCE
@@ -514,6 +518,51 @@ async def test_per_conversation_mode_keeps_one_session_per_conversation(
     assert [call["session_id"] for call in hermes.calls] == [None, None, "session-a"]
 
 
+async def test_each_agent_has_its_own_prompt_and_session(
+    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
+) -> None:
+    hass.config_entries.async_add_subentry(
+        setup_entry,
+        ConfigSubentry(
+            data=MappingProxyType(
+                {**DEFAULT_OPTIONS, CONF_PROMPT: "Trả lời tiếng Việt."}
+            ),
+            subentry_id="agent-2",
+            subentry_type=SUBENTRY_TYPE_CONVERSATION,
+            title="Hermes Vietnamese",
+            unique_id=None,
+        ),
+    )
+    await hass.async_block_till_done()
+    for session_id in ("session-en", "session-vi", "session-en", "session-vi"):
+        stream = hermes.stream(session_id)
+        stream.push("Okay.")
+        stream.finish()
+
+    await converse(hass, "Hello")
+    await conversation.async_converse(
+        hass, "Xin chào", None, Context(), agent_id="conversation.hermes_vietnamese"
+    )
+    await converse(hass, "Again")
+    await conversation.async_converse(
+        hass, "Nữa", None, Context(), agent_id="conversation.hermes_vietnamese"
+    )
+
+    assert hermes.calls[0]["messages"][0]["content"].startswith(DEFAULT_PROMPT)
+    assert hermes.calls[1]["messages"][0]["content"].startswith("Trả lời tiếng Việt.")
+    assert [call["session_id"] for call in hermes.calls] == [
+        None,
+        None,
+        "session-en",
+        "session-vi",
+    ]
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, "agent-2"), setup_entry.entry_id
+    )
+    assert device is not None
+    assert device.name == "Hermes Vietnamese"
+
+
 SERVICES_YAML = (
     Path(__file__).parent.parent
     / "custom_components"
@@ -599,11 +648,52 @@ async def test_ask_connection_error(
     assert str(err.value) == ERROR_CANNOT_CONNECT
 
 
-async def test_ask_with_an_unknown_entry(
+async def test_ask_with_an_unknown_agent(
     hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
 ) -> None:
-    with pytest.raises(ServiceValidationError):
-        await ask(hass, **{ATTR_TEXT: "Hello", ATTR_CONFIG_ENTRY_ID: "missing"})
+    with pytest.raises(ServiceValidationError, match=r"conversation\.missing"):
+        await ask(hass, **{ATTR_TEXT: "Hello", ATTR_AGENT_ID: "conversation.missing"})
+
+
+async def test_ask_needs_an_agent_when_several_exist(
+    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
+) -> None:
+    hass.config_entries.async_add_subentry(
+        setup_entry,
+        ConfigSubentry(
+            data=MappingProxyType(dict(DEFAULT_OPTIONS)),
+            subentry_id="agent-2",
+            subentry_type=SUBENTRY_TYPE_CONVERSATION,
+            title="Hermes Vietnamese",
+            unique_id=None,
+        ),
+    )
+    await hass.async_block_till_done()
+    stream = hermes.stream("session-vi")
+    stream.push("Được.")
+    stream.finish()
+
+    with pytest.raises(ServiceValidationError, match="agent_id"):
+        await ask(hass, **{ATTR_TEXT: "Hello"})
+
+    response = await ask(
+        hass, **{ATTR_TEXT: "Xin chào", ATTR_AGENT_ID: "conversation.hermes_vietnamese"}
+    )
+
+    assert response["session_id"] == "session-vi"
+    assert setup_entry.runtime_data.stores["agent-2"].get(None) == "session-vi"
+    assert setup_entry.runtime_data.stores[SUBENTRY_ID].get(None) is None
+
+
+async def test_ask_with_an_unloaded_agent(
+    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
+) -> None:
+    assert await hass.config_entries.async_unload(setup_entry.entry_id)
+
+    with pytest.raises(ServiceValidationError, match="not loaded"):
+        await ask(hass, **{ATTR_TEXT: "Hello", ATTR_AGENT_ID: ENTITY_ID})
+    with pytest.raises(ServiceValidationError, match="No Hermes"):
+        await ask(hass, **{ATTR_TEXT: "Hello"})
 
 
 async def test_ask_rejects_an_unsafe_session_id(
@@ -619,6 +709,6 @@ def test_services_yaml_lists_the_ask_fields() -> None:
     assert set(services[SERVICE_ASK]["fields"]) == {
         ATTR_TEXT,
         ATTR_SESSION_ID,
-        ATTR_CONFIG_ENTRY_ID,
+        ATTR_AGENT_ID,
     }
     assert services[SERVICE_ASK]["fields"][ATTR_TEXT]["required"] is True

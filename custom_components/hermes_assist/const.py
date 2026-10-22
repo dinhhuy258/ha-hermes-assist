@@ -62,7 +62,9 @@ SATELLITE_IDLE_TIMEOUT: Final = 60
 VALIDATE_TIMEOUT: Final = 10
 CONNECT_TIMEOUT: Final = 10
 
+SUBENTRY_TYPE_CONVERSATION: Final = "conversation"
+
 SERVICE_ASK: Final = "ask"
 ATTR_TEXT: Final = "text"
 ATTR_SESSION_ID: Final = "session_id"
-ATTR_CONFIG_ENTRY_ID: Final = "config_entry_id"
+ATTR_AGENT_ID: Final = "agent_id"

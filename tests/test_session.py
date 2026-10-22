@@ -17,12 +17,13 @@ from custom_components.hermes_assist.const import (
 )
 from custom_components.hermes_assist.session import (
     SessionStore,
+    async_move_sessions,
     async_remove_sessions,
     storage_key,
 )
 
-ENTRY_ID = "entry-1"
-KEY = storage_key(ENTRY_ID)
+SUBENTRY_ID = "agent-1"
+KEY = storage_key(SUBENTRY_ID)
 
 
 def stored(session_id: Any, last_used: Any) -> dict[str, Any]:
@@ -39,7 +40,7 @@ async def load_store(
     hass: HomeAssistant, mode: str, idle_timeout: float = 1800
 ) -> SessionStore:
     """Create and load a session store."""
-    store = SessionStore(hass, ENTRY_ID, mode, idle_timeout)
+    store = SessionStore(hass, SUBENTRY_ID, mode, idle_timeout)
     await store.async_load()
     return store
 
@@ -51,7 +52,7 @@ async def flush(hass: HomeAssistant) -> None:
 
 
 def test_storage_key() -> None:
-    assert KEY == "hermes_assist.entry-1"
+    assert KEY == "hermes_assist.agent-1"
 
 
 async def test_keep_mode_survives_time_and_restart(
@@ -190,6 +191,26 @@ async def test_async_remove_sessions(
 ) -> None:
     hass_storage[KEY] = stored("session-1", 0.0)
 
-    await async_remove_sessions(hass, ENTRY_ID)
+    await async_remove_sessions(hass, SUBENTRY_ID)
 
     assert KEY not in hass_storage
+
+
+async def test_async_move_sessions(
+    hass: HomeAssistant, hass_storage: dict[str, Any]
+) -> None:
+    old_key = storage_key("entry-1")
+    hass_storage[old_key] = {**stored("session-1", 5.0), "key": old_key}
+
+    await async_move_sessions(hass, "entry-1", SUBENTRY_ID)
+
+    assert old_key not in hass_storage
+    assert hass_storage[KEY]["data"] == {"session_id": "session-1", "last_used": 5.0}
+
+
+async def test_async_move_sessions_without_a_file(
+    hass: HomeAssistant, hass_storage: dict[str, Any]
+) -> None:
+    await async_move_sessions(hass, "entry-1", SUBENTRY_ID)
+
+    assert hass_storage == {}

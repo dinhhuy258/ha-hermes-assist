@@ -30,24 +30,31 @@ A trailing `/v1` in the URL is removed, and each URL can be added once.
 
 ## Using it in Assist
 
+Setting up the integration creates one conversation agent, `conversation.hermes_assist`, with the default options.
+
 1. Go to **Settings > Voice assistants** and open or create a pipeline.
-2. Select **Hermes Assist** as the conversation agent.
+2. Select the Hermes agent as the conversation agent.
 3. Select a streaming text to speech engine to hear long answers sooner.
 
-## Options
+## Conversation agents
+
+Each agent is a subentry of the Hermes Assist entry: it has its own name, prompt, model, session and timing, and it appears as one conversation entity with one device.
+Add more agents from the integration page with **Add conversation agent**, for example one agent per language or per room, and pick each one in its own pipeline.
+Reconfigure an agent from the three-dot menu of its row; deleting an agent removes its entity and its stored session.
 
 | Option | Default | Description |
 |---|---|---|
+| Name | `Hermes Assist` | Name of the conversation entity and its device. |
 | Prompt | Smart-speaker prompt | System prompt sent with every voice request. |
 | Model | Empty | Sent as `model` only when set. |
-| Session key | `homeassistant:assist` | Sent as `X-Hermes-Session-Key` to select the Hermes memory scope. |
+| Session key | `homeassistant:assist` | Sent as `X-Hermes-Session-Key` to select the Hermes memory scope. Agents that share a key share Hermes memory. |
 | Session mode | `idle` | `keep`, `idle` or `per_conversation`. |
 | Session idle timeout | 1800 s | Used only in `idle` mode, 60 to 86400 seconds. |
 | Reset phrases | `start over, new conversation, reset conversation` | Comma-separated phrases that start a new session. |
 | Hand off after | 15 s | 0 to 29 seconds; 0 disables the hand-off. |
 | Timeout | 600 s | 5 to 1800 seconds for one request, including a handed-off request. |
 
-Changing the session key or the session mode clears the stored session.
+Changing the session key or the session mode of an agent clears its stored session.
 
 ## Session modes
 
@@ -55,7 +62,7 @@ Changing the session key or the session mode clears the stored session.
 - `idle`: one Hermes session that is replaced after the idle timeout without requests.
 - `per_conversation`: one Hermes session per Home Assistant conversation, kept in memory and lost on restart.
 
-The session id lives in `.storage/hermes_assist.<entry_id>`.
+The session id of each agent lives in `.storage/hermes_assist.<subentry_id>`.
 Hermes does not expire sessions that are addressed by id, so the idle timeout is the only expiry.
 
 ## Long requests
@@ -82,7 +89,7 @@ response_variable: hermes
 ```
 
 The response is `{"text": "...", "session_id": "..."}`.
-Pass `session_id` to use a specific Hermes session for one call, and `config_entry_id` when more than one Hermes Assist entry is set up.
+Pass `session_id` to use a specific Hermes session for one call, and `agent_id` (the conversation entity, for example `conversation.hermes_assist`) when more than one agent exists.
 
 ## Privacy and security
 

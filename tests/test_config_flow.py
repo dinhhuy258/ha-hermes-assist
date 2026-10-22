@@ -1,14 +1,22 @@
-"""Tests for the Hermes Assist config flow, options flow and entry setup."""
+"""Tests for the Hermes Assist config flow, agent subentry flow and entry setup."""
 
 import json
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 from unittest.mock import patch
 
 import aiohttp
-from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER, ConfigEntryState
+from homeassistant.config_entries import (
+    SOURCE_REAUTH,
+    SOURCE_USER,
+    ConfigEntryState,
+    ConfigSubentry,
+)
+from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -17,7 +25,7 @@ from pytest_homeassistant_custom_component.common import (
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
 from custom_components.hermes_assist.const import (
-    ATTR_CONFIG_ENTRY_ID,
+    ATTR_AGENT_ID,
     ATTR_SESSION_ID,
     ATTR_TEXT,
     CONF_API_KEY,
@@ -35,17 +43,25 @@ from custom_components.hermes_assist.const import (
     NAME,
     SESSION_MODE_KEEP,
     SESSION_MODES,
+    SUBENTRY_TYPE_CONVERSATION,
 )
 from custom_components.hermes_assist.session import storage_key
 
-from .conftest import API_KEY, HERMES_URL, MODELS_RESPONSE, MODELS_URL
+from .conftest import (
+    API_KEY,
+    ENTITY_ID,
+    HERMES_URL,
+    MODELS_RESPONSE,
+    MODELS_URL,
+    SUBENTRY_ID,
+)
 
 NEW_URL = "https://hermes-new.example.com"
 
 
-def options_input(**changes: Any) -> dict[str, Any]:
-    """Return a complete options form submission."""
-    return {**DEFAULT_OPTIONS, **changes}
+def agent_input(**changes: Any) -> dict[str, Any]:
+    """Return a complete agent form submission."""
+    return {CONF_NAME: NAME, **DEFAULT_OPTIONS, **changes}
 
 
 async def flush_storage(hass: HomeAssistant) -> None:
@@ -73,7 +89,19 @@ async def test_user_flow_creates_entry(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == NAME
     assert result["data"] == {CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY}
-    assert result["options"] == DEFAULT_OPTIONS
+    assert result["options"] == {}
+    assert result["subentries"] == [
+        {
+            "subentry_type": SUBENTRY_TYPE_CONVERSATION,
+            "title": NAME,
+            "unique_id": None,
+            "data": DEFAULT_OPTIONS,
+        }
+    ]
+    entry = result["result"]
+    (subentry,) = entry.subentries.values()
+    assert hass.states.get(ENTITY_ID) is not None
+    assert entry.runtime_data.stores.keys() == {subentry.subentry_id}
 
 
 @pytest.mark.parametrize(
@@ -257,7 +285,7 @@ async def test_unload_and_remove_delete_the_sessions(
     setup_entry: MockConfigEntry,
     hass_storage: dict[str, Any],
 ) -> None:
-    key = storage_key(setup_entry.entry_id)
+    key = storage_key(SUBENTRY_ID)
     assert await hass.config_entries.async_unload(setup_entry.entry_id)
     assert setup_entry.state is ConfigEntryState.NOT_LOADED
 
@@ -273,22 +301,172 @@ async def test_unload_and_remove_delete_the_sessions(
     assert key not in hass_storage
 
 
-async def test_options_flow_saves_all_fields(
-    hass: HomeAssistant, setup_entry: MockConfigEntry
+async def test_removing_an_agent_deletes_its_sessions_and_entity(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
 ) -> None:
-    result = await hass.config_entries.options.async_init(setup_entry.entry_id)
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "init"
+    hass.config_entries.async_add_subentry(
+        setup_entry,
+        ConfigSubentry(
+            data=MappingProxyType(dict(DEFAULT_OPTIONS)),
+            subentry_id="agent-2",
+            subentry_type=SUBENTRY_TYPE_CONVERSATION,
+            title="Hermes Vietnamese",
+            unique_id=None,
+        ),
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get("conversation.hermes_vietnamese") is not None
+    setup_entry.runtime_data.stores["agent-2"].set(None, "session-2")
+    await flush_storage(hass)
+    assert storage_key("agent-2") in hass_storage
 
-    result = await hass.config_entries.options.async_configure(
+    hass.config_entries.async_remove_subentry(setup_entry, "agent-2")
+    await hass.async_block_till_done()
+
+    assert storage_key("agent-2") not in hass_storage
+    assert hass.states.get("conversation.hermes_vietnamese") is None
+    assert "agent-2" not in setup_entry.runtime_data.stores
+    assert setup_entry.state is ConfigEntryState.LOADED
+
+
+async def test_migrates_a_version_1_entry_into_an_agent(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+) -> None:
+    aioclient_mock.get(MODELS_URL, json=MODELS_RESPONSE)
+    options = {
+        **DEFAULT_OPTIONS,
+        CONF_PROMPT: "Be brief.",
+        CONF_SESSION_MODE: SESSION_MODE_KEEP,
+    }
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=NAME,
+        version=1,
+        data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
+        options=options,
+    )
+    entry.add_to_hass(hass)
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+    device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=NAME,
+        manufacturer="Nous Research",
+        model="Hermes Agent",
+        entry_type=dr.DeviceEntryType.SERVICE,
+    )
+    entity_registry.async_get_or_create(
+        "conversation",
+        DOMAIN,
+        entry.entry_id,
+        config_entry=entry,
+        device_id=device.id,
+        suggested_object_id="hermes_assist",
+    )
+    old_key = storage_key(entry.entry_id)
+    hass_storage[old_key] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": old_key,
+        "data": {"session_id": "session-1", "last_used": 0.0},
+    }
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.version == 2
+    assert entry.options == {}
+    (subentry,) = entry.subentries.values()
+    assert subentry.subentry_type == SUBENTRY_TYPE_CONVERSATION
+    assert subentry.title == NAME
+    assert dict(subentry.data) == options
+    registry_entry = entity_registry.async_get(ENTITY_ID)
+    assert registry_entry is not None
+    assert registry_entry.unique_id == subentry.subentry_id
+    assert registry_entry.config_subentry_id == subentry.subentry_id
+    assert hass.states.get(ENTITY_ID) is not None
+    device = device_registry.async_get(device.id)
+    assert device is not None
+    assert device.identifiers == {(DOMAIN, subentry.subentry_id)}
+    assert device.config_entry_id == entry.entry_id
+    assert device.config_subentry_id == subentry.subentry_id
+    assert (
+        device_registry.async_get_device_by_identifier(
+            (DOMAIN, subentry.subentry_id), entry.entry_id
+        )
+        == device
+    )
+    assert old_key not in hass_storage
+    assert hass_storage[storage_key(subentry.subentry_id)]["data"]["session_id"] == (
+        "session-1"
+    )
+    assert entry.runtime_data.stores[subentry.subentry_id].get(None) == "session-1"
+
+
+async def test_migrates_a_version_1_entry_that_never_loaded(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    aioclient_mock.get(MODELS_URL, json=MODELS_RESPONSE)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=NAME,
+        version=1,
+        data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    (subentry,) = entry.subentries.values()
+    assert dict(subentry.data) == DEFAULT_OPTIONS
+    assert hass.states.get(ENTITY_ID) is not None
+
+
+async def test_a_future_version_is_not_migrated(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=NAME,
+        version=3,
+        data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
+    )
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+
+    assert entry.state is ConfigEntryState.MIGRATION_ERROR
+
+
+async def start_add_agent(hass: HomeAssistant, entry: MockConfigEntry) -> Any:
+    """Open the add-agent subentry form."""
+    return await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_TYPE_CONVERSATION), context={"source": SOURCE_USER}
+    )
+
+
+async def test_add_agent_creates_an_entity_with_its_own_options(
+    hass: HomeAssistant, setup_entry: MockConfigEntry, hass_storage: dict[str, Any]
+) -> None:
+    result = await start_add_agent(hass, setup_entry)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {
-            CONF_PROMPT: "Be brief.",
+            CONF_NAME: "Hermes Vietnamese",
+            CONF_PROMPT: "Trả lời tiếng Việt.",
             CONF_MODEL: "hermes-agent",
-            CONF_SESSION_KEY: "homeassistant:kitchen",
+            CONF_SESSION_KEY: "homeassistant:vi",
             CONF_SESSION_MODE: SESSION_MODE_KEEP,
             CONF_SESSION_IDLE_TIMEOUT: 900,
-            CONF_RESET_PHRASES: "forget it",
+            CONF_RESET_PHRASES: "làm lại",
             CONF_HANDOFF_AFTER: 10,
             CONF_TIMEOUT: 300,
         },
@@ -296,28 +474,34 @@ async def test_options_flow_saves_all_fields(
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert setup_entry.options == {
-        CONF_PROMPT: "Be brief.",
+    assert result["title"] == "Hermes Vietnamese"
+    assert result["data"] == {
+        CONF_PROMPT: "Trả lời tiếng Việt.",
         CONF_MODEL: "hermes-agent",
-        CONF_SESSION_KEY: "homeassistant:kitchen",
+        CONF_SESSION_KEY: "homeassistant:vi",
         CONF_SESSION_MODE: SESSION_MODE_KEEP,
         CONF_SESSION_IDLE_TIMEOUT: 900,
-        CONF_RESET_PHRASES: "forget it",
+        CONF_RESET_PHRASES: "làm lại",
         CONF_HANDOFF_AFTER: 10,
         CONF_TIMEOUT: 300,
     }
-    assert isinstance(setup_entry.options[CONF_TIMEOUT], int)
+    assert isinstance(result["data"][CONF_TIMEOUT], int)
+    assert len(setup_entry.subentries) == 2
     assert setup_entry.state is ConfigEntryState.LOADED
+    assert hass.states.get("conversation.hermes_vietnamese") is not None
+    assert hass.states.get(ENTITY_ID) is not None
+    assert set(setup_entry.runtime_data.stores) == set(setup_entry.subentries)
 
 
-async def test_options_flow_stores_cleared_text_fields_as_empty(
+async def test_add_agent_stores_cleared_text_fields_as_empty(
     hass: HomeAssistant, setup_entry: MockConfigEntry
 ) -> None:
-    result = await hass.config_entries.options.async_init(setup_entry.entry_id)
+    result = await start_add_agent(hass, setup_entry)
 
-    await hass.config_entries.options.async_configure(
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {
+            CONF_NAME: "Bare",
             CONF_SESSION_MODE: DEFAULT_OPTIONS[CONF_SESSION_MODE],
             CONF_SESSION_IDLE_TIMEOUT: 1800,
             CONF_HANDOFF_AFTER: 15,
@@ -326,10 +510,10 @@ async def test_options_flow_stores_cleared_text_fields_as_empty(
     )
     await hass.async_block_till_done()
 
-    assert setup_entry.options[CONF_PROMPT] == ""
-    assert setup_entry.options[CONF_MODEL] == ""
-    assert setup_entry.options[CONF_SESSION_KEY] == ""
-    assert setup_entry.options[CONF_RESET_PHRASES] == ""
+    assert result["data"][CONF_PROMPT] == ""
+    assert result["data"][CONF_MODEL] == ""
+    assert result["data"][CONF_SESSION_KEY] == ""
+    assert result["data"][CONF_RESET_PHRASES] == ""
 
 
 @pytest.mark.parametrize(
@@ -344,15 +528,47 @@ async def test_options_flow_stores_cleared_text_fields_as_empty(
         (CONF_SESSION_MODE, "forever"),
     ],
 )
-async def test_options_flow_rejects_out_of_range_values(
+async def test_add_agent_rejects_out_of_range_values(
     hass: HomeAssistant, setup_entry: MockConfigEntry, field: str, value: Any
 ) -> None:
-    result = await hass.config_entries.options.async_init(setup_entry.entry_id)
+    result = await start_add_agent(hass, setup_entry)
 
     with pytest.raises(InvalidData):
-        await hass.config_entries.options.async_configure(
-            result["flow_id"], options_input(**{field: value})
+        await hass.config_entries.subentries.async_configure(
+            result["flow_id"], agent_input(**{field: value})
         )
+
+
+async def test_reconfigure_agent_saves_all_fields(
+    hass: HomeAssistant, setup_entry: MockConfigEntry
+) -> None:
+    result = await setup_entry.start_subentry_reconfigure_flow(hass, SUBENTRY_ID)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        agent_input(
+            **{
+                CONF_NAME: "Hermes English",
+                CONF_PROMPT: "Be brief.",
+                CONF_HANDOFF_AFTER: 10,
+            }
+        ),
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    subentry = setup_entry.subentries[SUBENTRY_ID]
+    assert subentry.title == "Hermes English"
+    assert dict(subentry.data) == {
+        **DEFAULT_OPTIONS,
+        CONF_PROMPT: "Be brief.",
+        CONF_HANDOFF_AFTER: 10,
+    }
+    assert setup_entry.state is ConfigEntryState.LOADED
+    assert hass.states.get(ENTITY_ID) is not None
 
 
 @pytest.mark.parametrize(
@@ -369,19 +585,19 @@ async def test_changing_the_session_scope_clears_sessions(
     field: str,
     value: str,
 ) -> None:
-    key = storage_key(setup_entry.entry_id)
-    setup_entry.runtime_data.store.set(None, "session-1")
+    key = storage_key(SUBENTRY_ID)
+    setup_entry.runtime_data.stores[SUBENTRY_ID].set(None, "session-1")
     await flush_storage(hass)
     assert hass_storage[key]["data"]["session_id"] == "session-1"
 
-    result = await hass.config_entries.options.async_init(setup_entry.entry_id)
-    await hass.config_entries.options.async_configure(
-        result["flow_id"], options_input(**{field: value})
+    result = await setup_entry.start_subentry_reconfigure_flow(hass, SUBENTRY_ID)
+    await hass.config_entries.subentries.async_configure(
+        result["flow_id"], agent_input(**{field: value})
     )
     await hass.async_block_till_done()
 
     assert key not in hass_storage
-    assert setup_entry.runtime_data.store.get(None) is None
+    assert setup_entry.runtime_data.stores[SUBENTRY_ID].get(None) is None
 
 
 async def test_other_option_changes_keep_sessions(
@@ -389,18 +605,37 @@ async def test_other_option_changes_keep_sessions(
     setup_entry: MockConfigEntry,
     hass_storage: dict[str, Any],
 ) -> None:
-    key = storage_key(setup_entry.entry_id)
-    setup_entry.runtime_data.store.set(None, "session-1")
+    key = storage_key(SUBENTRY_ID)
+    setup_entry.runtime_data.stores[SUBENTRY_ID].set(None, "session-1")
     await flush_storage(hass)
 
-    result = await hass.config_entries.options.async_init(setup_entry.entry_id)
-    await hass.config_entries.options.async_configure(
-        result["flow_id"], options_input(**{CONF_HANDOFF_AFTER: 5})
+    result = await setup_entry.start_subentry_reconfigure_flow(hass, SUBENTRY_ID)
+    await hass.config_entries.subentries.async_configure(
+        result["flow_id"], agent_input(**{CONF_HANDOFF_AFTER: 5})
     )
     await hass.async_block_till_done()
 
     assert hass_storage[key]["data"]["session_id"] == "session-1"
-    assert setup_entry.runtime_data.store.get(None) == "session-1"
+    assert setup_entry.runtime_data.stores[SUBENTRY_ID].get(None) == "session-1"
+
+
+async def test_changing_the_session_scope_of_an_unloaded_agent_clears_sessions(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    key = storage_key(SUBENTRY_ID)
+    setup_entry.runtime_data.stores[SUBENTRY_ID].set(None, "session-1")
+    await flush_storage(hass)
+    assert await hass.config_entries.async_unload(setup_entry.entry_id)
+
+    result = await setup_entry.start_subentry_reconfigure_flow(hass, SUBENTRY_ID)
+    await hass.config_entries.subentries.async_configure(
+        result["flow_id"], agent_input(**{CONF_SESSION_MODE: SESSION_MODE_KEEP})
+    )
+    await hass.async_block_till_done()
+
+    assert key not in hass_storage
 
 
 COMPONENT = Path(__file__).parent.parent / "custom_components" / DOMAIN
@@ -427,13 +662,17 @@ def test_translations_cover_every_form_field() -> None:
         "reauth_successful",
         "reconfigure_successful",
     }
-    assert set(strings["options"]["step"]["init"]["data"]) == set(DEFAULT_OPTIONS)
-    assert set(strings["options"]["step"]["init"]["data_description"]) == set(
-        DEFAULT_OPTIONS
-    )
+    assert "options" not in strings
+    agent = strings["config_subentries"][SUBENTRY_TYPE_CONVERSATION]
+    assert set(agent["initiate_flow"]) == {"user", "reconfigure"}
+    fields = {CONF_NAME, *DEFAULT_OPTIONS}
+    for step in ("user", "reconfigure"):
+        assert set(agent["step"][step]["data"]) == fields
+        assert set(agent["step"][step]["data_description"]) == fields
+    assert set(agent["abort"]) == {"reconfigure_successful"}
     assert set(strings["selector"]["session_mode"]["options"]) == set(SESSION_MODES)
     assert set(strings["services"]["ask"]["fields"]) == {
         ATTR_TEXT,
         ATTR_SESSION_ID,
-        ATTR_CONFIG_ENTRY_ID,
+        ATTR_AGENT_ID,
     }

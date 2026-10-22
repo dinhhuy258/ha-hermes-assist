@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentryDataWithId
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 import pytest
@@ -18,6 +19,7 @@ from custom_components.hermes_assist.const import (
     DEFAULT_OPTIONS,
     DOMAIN,
     NAME,
+    SUBENTRY_TYPE_CONVERSATION,
 )
 
 HERMES_URL = "https://hermes.example.com"
@@ -25,6 +27,7 @@ MODELS_URL = f"{HERMES_URL}/v1/models"
 CHAT_URL = f"{HERMES_URL}/v1/chat/completions"
 API_KEY = "test-key"
 ENTITY_ID = "conversation.hermes_assist"
+SUBENTRY_ID = "agent-1"
 MODELS_RESPONSE: dict[str, Any] = {
     "object": "list",
     "data": [{"id": "hermes-agent", "object": "model"}],
@@ -93,13 +96,32 @@ class FakeHermes:
             stream.closed = True
 
 
+def subentry_data(
+    title: str = NAME, subentry_id: str = SUBENTRY_ID, **changes: Any
+) -> ConfigSubentryDataWithId:
+    """Return the stored form of one conversation agent."""
+    return {
+        "subentry_id": subentry_id,
+        "subentry_type": SUBENTRY_TYPE_CONVERSATION,
+        "title": title,
+        "unique_id": None,
+        "data": {**DEFAULT_OPTIONS, **changes},
+    }
+
+
 async def set_options(
-    hass: HomeAssistant, entry: MockConfigEntry, changes: dict[str, Any]
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    changes: dict[str, Any],
+    subentry_id: str = SUBENTRY_ID,
 ) -> None:
-    """Change options and reload the entry, as the options flow does."""
-    hass.config_entries.async_update_entry(entry, options={**entry.options, **changes})
-    assert await hass.config_entries.async_reload(entry.entry_id)
+    """Change an agent's options; the update listener reloads the entry."""
+    subentry = entry.subentries[subentry_id]
+    hass.config_entries.async_update_subentry(
+        entry, subentry, data={**subentry.data, **changes}
+    )
     await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
 
 
 @pytest.fixture(autouse=True)
@@ -110,12 +132,13 @@ async def auto_setup(hass: HomeAssistant, enable_custom_integrations: None) -> N
 
 @pytest.fixture
 def mock_entry(hass: HomeAssistant) -> MockConfigEntry:
-    """Return a config entry with the default options, added but not set up."""
+    """Return a config entry with one default agent, added but not set up."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         title=NAME,
+        version=2,
         data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
-        options=dict(DEFAULT_OPTIONS),
+        subentries_data=[subentry_data()],
     )
     entry.add_to_hass(hass)
     return entry

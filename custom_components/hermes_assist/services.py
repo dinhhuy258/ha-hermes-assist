@@ -3,7 +3,7 @@
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -12,7 +12,7 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 import voluptuous as vol
 
 from .api import (
@@ -23,7 +23,7 @@ from .api import (
     is_valid_session_id,
 )
 from .const import (
-    ATTR_CONFIG_ENTRY_ID,
+    ATTR_AGENT_ID,
     ATTR_SESSION_ID,
     ATTR_TEXT,
     CONF_MODEL,
@@ -33,6 +33,7 @@ from .const import (
     DEFAULT_TIMEOUT,
     DOMAIN,
     SERVICE_ASK,
+    SUBENTRY_TYPE_CONVERSATION,
 )
 from .messages import (
     ERROR_AUTH,
@@ -57,7 +58,7 @@ ASK_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_TEXT): cv.string,
         vol.Optional(ATTR_SESSION_ID): _session_id,
-        vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(ATTR_AGENT_ID): cv.entity_id,
     }
 )
 
@@ -73,9 +74,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
         configured timeout. A given session_id is used for this call only and
         leaves the stored session unchanged.
         """
-        entry = _get_entry(hass, call.data.get(ATTR_CONFIG_ENTRY_ID))
+        entry, subentry = _get_agent(hass, call.data.get(ATTR_AGENT_ID))
         data = entry.runtime_data
-        options = entry.options
+        store = data.stores[subentry.subentry_id]
+        options = subentry.data
         override: str | None = call.data.get(ATTR_SESSION_ID)
         timeout = float(options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT))
         try:
@@ -86,13 +88,13 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     model=options.get(CONF_MODEL) or None,
                     session_key=options.get(CONF_SESSION_KEY, DEFAULT_SESSION_KEY)
                     or None,
-                    session_id=override or data.store.get(None),
+                    session_id=override or store.get(None),
                     timeout=timeout,
                 ) as stream,
             ):
                 session_id = stream.session_id
                 if override is None:
-                    data.store.set(None, session_id)
+                    store.set(None, session_id)
                 text = "".join([part async for part in stream])
         except (TimeoutError, HermesTimeoutError) as err:
             raise HomeAssistantError(ERROR_TOO_LONG) from err
@@ -105,7 +107,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(ERROR_GENERIC) from err
 
         if override is None:
-            data.store.touch(None)
+            store.touch(None)
         return {"text": text.strip(), "session_id": session_id}
 
     hass.services.async_register(
@@ -117,22 +119,35 @@ def async_setup_services(hass: HomeAssistant) -> None:
     )
 
 
-def _get_entry(hass: HomeAssistant, entry_id: str | None) -> HermesAssistConfigEntry:
-    """Return the entry to ask; it may be left out when only one is loaded."""
-    if entry_id:
-        entry = hass.config_entries.async_get_entry(entry_id)
-        if entry is None or entry.domain != DOMAIN:
-            raise ServiceValidationError(f"No Hermes Assist entry with ID {entry_id}")
-        if entry.state is not ConfigEntryState.LOADED:
+def _get_agent(
+    hass: HomeAssistant, agent_id: str | None
+) -> tuple[HermesAssistConfigEntry, ConfigSubentry]:
+    """Return the entry and agent to ask; agent_id may be left out with one agent."""
+    if agent_id:
+        registry_entry = er.async_get(hass).async_get(agent_id)
+        if (
+            registry_entry is None
+            or registry_entry.platform != DOMAIN
+            or registry_entry.config_entry_id is None
+            or registry_entry.config_subentry_id is None
+        ):
+            raise ServiceValidationError(f"{agent_id} is not a Hermes Assist agent")
+        entry = hass.config_entries.async_get_entry(registry_entry.config_entry_id)
+        if entry is None or entry.state is not ConfigEntryState.LOADED:
             raise ServiceValidationError(
-                f"Hermes Assist entry {entry.title} is not loaded"
+                f"Hermes Assist agent {agent_id} is not loaded"
             )
-        return entry
-    entries = hass.config_entries.async_loaded_entries(DOMAIN)
-    if not entries:
-        raise ServiceValidationError("No Hermes Assist entry is loaded")
-    if len(entries) > 1:
+        return entry, entry.subentries[registry_entry.config_subentry_id]
+
+    agents = [
+        (entry, subentry)
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN)
+        for subentry in entry.get_subentries_of_type(SUBENTRY_TYPE_CONVERSATION)
+    ]
+    if not agents:
+        raise ServiceValidationError("No Hermes Assist agent is loaded")
+    if len(agents) > 1:
         raise ServiceValidationError(
-            "More than one Hermes Assist entry is loaded; set config_entry_id"
+            "More than one Hermes Assist agent exists; set agent_id"
         )
-    return entries[0]
+    return agents[0]

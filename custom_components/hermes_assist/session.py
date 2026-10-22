@@ -1,4 +1,4 @@
-"""Hermes session state for one config entry."""
+"""Hermes session state for one conversation agent."""
 
 from collections import OrderedDict
 from typing import TypedDict
@@ -20,20 +20,25 @@ from .const import (
 
 
 class StoredSession(TypedDict):
-    """Content of .storage/hermes_assist.<entry_id>."""
+    """Content of .storage/hermes_assist.<subentry_id>."""
 
     session_id: str | None
     last_used: float | None
 
 
-def storage_key(entry_id: str) -> str:
-    """Return the storage key of a config entry."""
-    return f"{DOMAIN}.{entry_id}"
+def storage_key(subentry_id: str) -> str:
+    """Return the storage key of a conversation agent."""
+    return f"{DOMAIN}.{subentry_id}"
 
 
 def _now() -> float:
     """Return the current time as a UTC timestamp."""
     return dt_util.utcnow().timestamp()
+
+
+def _store(hass: HomeAssistant, subentry_id: str) -> Store[StoredSession]:
+    """Return the storage object of a conversation agent."""
+    return Store(hass, STORAGE_VERSION, storage_key(subentry_id))
 
 
 class SessionStore:
@@ -45,12 +50,10 @@ class SessionStore:
     """
 
     def __init__(
-        self, hass: HomeAssistant, entry_id: str, mode: str, idle_timeout: float
+        self, hass: HomeAssistant, subentry_id: str, mode: str, idle_timeout: float
     ) -> None:
         """Initialize the store; call async_load before use."""
-        self._store: Store[StoredSession] = Store(
-            hass, STORAGE_VERSION, storage_key(entry_id)
-        )
+        self._store = _store(hass, subentry_id)
         self._mode = mode
         self._idle_timeout = idle_timeout
         self._session_id: str | None = None
@@ -139,20 +142,31 @@ class SessionStore:
         return {"session_id": self._session_id, "last_used": self._last_used}
 
 
-async def async_remove_sessions(hass: HomeAssistant, entry_id: str) -> None:
-    """Delete the storage file of a config entry."""
-    await Store[StoredSession](
-        hass, STORAGE_VERSION, storage_key(entry_id)
-    ).async_remove()
+async def async_remove_sessions(hass: HomeAssistant, subentry_id: str) -> None:
+    """Delete the storage file of a conversation agent."""
+    await _store(hass, subentry_id).async_remove()
 
 
-async def async_clear_sessions(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Forget the stored sessions of a config entry, loaded or not.
+async def async_move_sessions(hass: HomeAssistant, old_id: str, new_id: str) -> None:
+    """Move a storage file to a new key; used when a v1 entry becomes a subentry."""
+    old = _store(hass, old_id)
+    data = await old.async_load()
+    if isinstance(data, dict):
+        await _store(hass, new_id).async_save(data)
+    await old.async_remove()
 
-    A loaded entry clears through its own store so that a pending delayed save
+
+async def async_clear_sessions(
+    hass: HomeAssistant, entry: ConfigEntry, subentry_id: str
+) -> None:
+    """Forget the stored sessions of a conversation agent, loaded or not.
+
+    A loaded agent clears through its own store so that a pending delayed save
     cannot write the old session back.
     """
-    if entry.state is ConfigEntryState.LOADED:
-        await entry.runtime_data.store.async_clear()
+    if entry.state is ConfigEntryState.LOADED and (
+        store := entry.runtime_data.stores.get(subentry_id)
+    ):
+        await store.async_clear()
         return
-    await async_remove_sessions(hass, entry.entry_id)
+    await async_remove_sessions(hass, subentry_id)

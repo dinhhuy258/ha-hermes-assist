@@ -1,4 +1,4 @@
-"""Config flow for Hermes Assist."""
+"""Config flow for Hermes Assist and the subentry flow of its agents."""
 
 from collections.abc import Mapping
 import logging
@@ -8,8 +8,10 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
-    OptionsFlowWithReload,
+    ConfigSubentryFlow,
+    SubentryFlowResult,
 )
+from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
@@ -39,8 +41,6 @@ from .const import (
     CONF_TIMEOUT,
     CONF_URL,
     DEFAULT_OPTIONS,
-    DEFAULT_SESSION_KEY,
-    DEFAULT_SESSION_MODE,
     DOMAIN,
     MAX_HANDOFF_AFTER,
     MAX_SESSION_IDLE_TIMEOUT,
@@ -50,6 +50,7 @@ from .const import (
     MIN_TIMEOUT,
     NAME,
     SESSION_MODES,
+    SUBENTRY_TYPE_CONVERSATION,
     TIMEOUT_STEP,
 )
 from .session import async_clear_sessions
@@ -87,8 +88,9 @@ def _seconds(minimum: int, maximum: int, step: int = 1) -> NumberSelector:
     )
 
 
-OPTIONS_SCHEMA = vol.Schema(
+AGENT_SCHEMA = vol.Schema(
     {
+        vol.Required(CONF_NAME): TextSelector(),
         vol.Optional(CONF_PROMPT): TextSelector(TextSelectorConfig(multiline=True)),
         vol.Optional(CONF_MODEL): TextSelector(),
         vol.Optional(CONF_SESSION_KEY): TextSelector(),
@@ -134,7 +136,7 @@ async def _async_validate(
 
 
 def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
-    """Return the options to store; cleared text fields are stored as empty."""
+    """Return the agent options to store; cleared text fields are stored as empty."""
     return {
         CONF_PROMPT: user_input.get(CONF_PROMPT, "").strip(),
         CONF_MODEL: user_input.get(CONF_MODEL, "").strip(),
@@ -150,18 +152,21 @@ def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
 class HermesAssistConfigFlow(ConfigFlow, domain=DOMAIN):
     """Set up a Hermes Agent API server."""
 
-    VERSION = 1
+    VERSION = 2
+    MINOR_VERSION = 1
 
-    @staticmethod
+    @classmethod
     @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> HermesAssistOptionsFlow:
-        """Return the options flow."""
-        return HermesAssistOptionsFlow()
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        """Return the subentry flows; each conversation agent is one subentry."""
+        return {SUBENTRY_TYPE_CONVERSATION: HermesAgentSubentryFlow}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Ask for the URL and the API key."""
+        """Ask for the URL and the API key; the entry starts with one agent."""
         errors: dict[str, str] = {}
         if user_input is not None:
             url = normalize_url(user_input[CONF_URL])
@@ -174,7 +179,14 @@ class HermesAssistConfigFlow(ConfigFlow, domain=DOMAIN):
                     return self.async_create_entry(
                         title=NAME,
                         data={CONF_URL: url, CONF_API_KEY: user_input[CONF_API_KEY]},
-                        options=dict(DEFAULT_OPTIONS),
+                        subentries=[
+                            {
+                                "subentry_type": SUBENTRY_TYPE_CONVERSATION,
+                                "title": NAME,
+                                "unique_id": None,
+                                "data": dict(DEFAULT_OPTIONS),
+                            }
+                        ],
                     )
         return self.async_show_form(
             step_id="user",
@@ -239,25 +251,49 @@ class HermesAssistConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
-class HermesAssistOptionsFlow(OptionsFlowWithReload):
-    """Edit the prompt, session and timing options."""
+class HermesAgentSubentryFlow(ConfigSubentryFlow):
+    """Add or reconfigure one conversation agent."""
 
-    async def async_step_init(
+    async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Show and save the options; the entry reloads afterwards."""
-        current = {**DEFAULT_OPTIONS, **self.config_entry.options}
+    ) -> SubentryFlowResult:
+        """Create an agent with its name and options."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title=user_input[CONF_NAME].strip() or NAME,
+                data=_options_from_input(user_input),
+            )
+        return self.async_show_form(
+            step_id="user",
+            data_schema=self.add_suggested_values_to_schema(
+                AGENT_SCHEMA, {CONF_NAME: NAME, **DEFAULT_OPTIONS}
+            ),
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Change the name and options; the entry reloads through its listener."""
+        entry = self._get_entry()
+        subentry = self._get_reconfigure_subentry()
+        current = {**DEFAULT_OPTIONS, **subentry.data}
         if user_input is not None:
             options = _options_from_input(user_input)
-            if options[CONF_SESSION_KEY] != current.get(
-                CONF_SESSION_KEY, DEFAULT_SESSION_KEY
-            ) or options[CONF_SESSION_MODE] != current.get(
-                CONF_SESSION_MODE, DEFAULT_SESSION_MODE
+            if (
+                options[CONF_SESSION_KEY] != current[CONF_SESSION_KEY]
+                or options[CONF_SESSION_MODE] != current[CONF_SESSION_MODE]
             ):
                 # Never continue a session under a different memory scope.
-                await async_clear_sessions(self.hass, self.config_entry)
-            return self.async_create_entry(data=options)
+                await async_clear_sessions(self.hass, entry, subentry.subentry_id)
+            return self.async_update_and_abort(
+                entry,
+                subentry,
+                title=user_input[CONF_NAME].strip() or subentry.title,
+                data=options,
+            )
         return self.async_show_form(
-            step_id="init",
-            data_schema=self.add_suggested_values_to_schema(OPTIONS_SCHEMA, current),
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                AGENT_SCHEMA, {CONF_NAME: subentry.title, **current}
+            ),
         )
