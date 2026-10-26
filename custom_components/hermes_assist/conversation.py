@@ -6,7 +6,12 @@ import logging
 import re
 from typing import Any, Literal
 
-from homeassistant.components import conversation, persistent_notification
+from homeassistant.components import (
+    assist_pipeline,
+    conversation,
+    persistent_notification,
+    tts,
+)
 from homeassistant.components.assist_satellite import AssistSatelliteEntityFeature
 from homeassistant.config_entries import ConfigSubentry
 from homeassistant.const import (
@@ -27,27 +32,27 @@ from . import HermesAssistConfigEntry, conversation_subentries
 from .api import HermesAuthError, HermesConnectionError, HermesError, HermesTimeoutError
 from .const import (
     CONF_HANDOFF_AFTER,
+    CONF_MESSAGE_AUTH,
+    CONF_MESSAGE_CANNOT_CONNECT,
+    CONF_MESSAGE_EMPTY,
+    CONF_MESSAGE_GENERIC,
+    CONF_MESSAGE_HANDOFF,
+    CONF_MESSAGE_RESET,
+    CONF_MESSAGE_TOO_LONG,
+    CONF_MESSAGES,
     CONF_MODEL,
     CONF_PROMPT,
     CONF_RESET_PHRASES,
     CONF_SESSION_KEY,
     CONF_TIMEOUT,
     DEFAULT_HANDOFF_AFTER,
+    DEFAULT_MESSAGES,
     DEFAULT_RESET_PHRASES,
     DEFAULT_SESSION_KEY,
     DEFAULT_TIMEOUT,
     DOMAIN,
+    NAME,
     SATELLITE_IDLE_TIMEOUT,
-)
-from .messages import (
-    ERROR_AUTH,
-    ERROR_CANNOT_CONNECT,
-    ERROR_EMPTY,
-    ERROR_GENERIC,
-    ERROR_TOO_LONG,
-    HANDOFF_MESSAGE,
-    NOTIFICATION_TITLE,
-    RESET_MESSAGE,
 )
 from .prompts import (
     DEFAULT_PROMPT,
@@ -114,6 +119,16 @@ def _normalize(text: str) -> str:
     return " ".join(re.sub(r"[^\w\s']", " ", text.lower()).split())
 
 
+def _same_language(first: str | None, second: str | None) -> bool:
+    """Return whether two language codes share their base language."""
+    if not first or not second:
+        return False
+    return (
+        first.replace("_", "-").split("-")[0].lower()
+        == second.replace("_", "-").split("-")[0].lower()
+    )
+
+
 def _is_reset(text: str, phrases: str) -> bool:
     """Return whether the utterance is one of the comma-separated reset phrases."""
     wanted = {_normalize(phrase) for phrase in phrases.split(",")} - {""}
@@ -162,6 +177,11 @@ class HermesAssistEntity(
         """Return the options of this agent."""
         return self.subentry.data
 
+    def _message(self, key: str) -> str:
+        """Return a spoken message of this agent, or its default when it is empty."""
+        messages = self._options.get(CONF_MESSAGES) or {}
+        return messages.get(key) or DEFAULT_MESSAGES[key]
+
     @property
     def _store(self) -> SessionStore:
         """Return the session store of this agent."""
@@ -196,7 +216,7 @@ class HermesAssistEntity(
             self._store.reset(conversation_id)
             if user_input.satellite_id:
                 self._follow_ups.pop(user_input.satellite_id, None)
-            return self._reply(user_input, chat_log, RESET_MESSAGE)
+            return self._reply(user_input, chat_log, self._message(CONF_MESSAGE_RESET))
 
         self._link_follow_up(user_input, conversation_id)
         deadline = self.hass.loop.time() + float(
@@ -221,7 +241,9 @@ class HermesAssistEntity(
                     first = await queue.get()
             except TimeoutError:
                 self._hand_off(producer, queue, deadline, user_input, conversation_id)
-                return self._reply(user_input, chat_log, HANDOFF_MESSAGE)
+                return self._reply(
+                    user_input, chat_log, self._message(CONF_MESSAGE_HANDOFF)
+                )
             if isinstance(first, HermesError):
                 return self._error(user_input, chat_log, self._error_message(first))
             if isinstance(first, str):
@@ -234,7 +256,7 @@ class HermesAssistEntity(
         self._store.touch(conversation_id)
         last = chat_log.content[-1]
         if not isinstance(last, conversation.AssistantContent) or not last.content:
-            return self._error(user_input, chat_log, ERROR_EMPTY)
+            return self._error(user_input, chat_log, self._message(CONF_MESSAGE_EMPTY))
         return conversation.async_get_result_from_chat_log(user_input, chat_log)
 
     def _messages(
@@ -378,7 +400,12 @@ class HermesAssistEntity(
         self.entry.async_create_background_task(
             self.hass,
             self._async_finish_later(
-                producer, queue, deadline, user_input.satellite_id, conversation_id
+                producer,
+                queue,
+                deadline,
+                user_input.satellite_id,
+                conversation_id,
+                user_input.language,
             ),
             f"{DOMAIN} late answer {conversation_id}",
         )
@@ -390,6 +417,7 @@ class HermesAssistEntity(
         deadline: float,
         satellite_id: str | None,
         conversation_id: str,
+        language: str | None,
     ) -> None:
         """Wait for a handed-off answer within the timeout, then deliver it."""
         try:
@@ -397,16 +425,16 @@ class HermesAssistEntity(
                 text, error = await _async_collect(queue)
         except TimeoutError:
             producer.cancel()
-            message = ERROR_TOO_LONG
+            message = self._message(CONF_MESSAGE_TOO_LONG)
         else:
             message = self._late_message(text, error)
         self._store.touch(conversation_id)
-        await self._async_deliver(satellite_id, conversation_id, message)
+        await self._async_deliver(satellite_id, conversation_id, message, language)
 
     def _late_message(self, text: str, error: HermesError | None) -> str:
         """Return what to deliver for a handed-off answer."""
         if isinstance(error, HermesTimeoutError):
-            return ERROR_TOO_LONG
+            return self._message(CONF_MESSAGE_TOO_LONG)
         if speakable := _speakable(text):
             if error is not None:
                 _LOGGER.warning(
@@ -415,33 +443,71 @@ class HermesAssistEntity(
             return speakable
         if error is not None:
             return self._error_message(error)
-        return ERROR_EMPTY
+        return self._message(CONF_MESSAGE_EMPTY)
 
     def _error_message(self, error: HermesError) -> str:
         """Return the spoken message for an error; ask for a new key once."""
         if isinstance(error, HermesAuthError):
             self.entry.runtime_data.request_reauth(self.hass, self.entry)
-            return ERROR_AUTH
+            return self._message(CONF_MESSAGE_AUTH)
         if isinstance(error, HermesTimeoutError):
-            return ERROR_TOO_LONG
+            return self._message(CONF_MESSAGE_TOO_LONG)
         if isinstance(error, HermesConnectionError):
             _LOGGER.warning("Could not reach Hermes: %s", error)
-            return ERROR_CANNOT_CONNECT
+            return self._message(CONF_MESSAGE_CANNOT_CONNECT)
         _LOGGER.warning("Hermes returned an error: %s", error)
-        return ERROR_GENERIC
+        return self._message(CONF_MESSAGE_GENERIC)
+
+    def _media_id(self, message: str, language: str | None) -> str | None:
+        """Return the message spoken by the TTS of a pipeline that uses this agent.
+
+        The satellite speaks an announcement with the TTS of its own pipeline,
+        which may be set up for another language. A pipeline in the language of
+        the request is preferred. None means the satellite chooses the TTS.
+        """
+        pipelines = [
+            pipeline
+            for pipeline in assist_pipeline.async_get_pipelines(self.hass)
+            if pipeline.conversation_engine == self.entity_id and pipeline.tts_engine
+        ]
+        if not pipelines:
+            return None
+        pipeline = next(
+            (p for p in pipelines if _same_language(p.language, language)),
+            pipelines[0],
+        )
+        options = {tts.ATTR_VOICE: pipeline.tts_voice} if pipeline.tts_voice else None
+        try:
+            return tts.generate_media_source_id(
+                self.hass,
+                message,
+                engine=pipeline.tts_engine,
+                language=pipeline.tts_language,
+                options=options,
+            )
+        except HomeAssistantError as err:
+            _LOGGER.warning(
+                "Could not use the text to speech of pipeline %s: %s",
+                pipeline.name,
+                err,
+            )
+            return None
 
     async def _async_deliver(
-        self, satellite_id: str | None, conversation_id: str, message: str
+        self,
+        satellite_id: str | None,
+        conversation_id: str,
+        message: str,
+        language: str | None,
     ) -> None:
         """Speak a late answer on the satellite that asked, else notify."""
         if satellite_id is None or not await self._async_wait_for_idle(satellite_id):
-            persistent_notification.async_create(
-                self.hass, message, title=NOTIFICATION_TITLE
-            )
+            persistent_notification.async_create(self.hass, message, title=NAME)
             return
 
         state = self.hass.states.get(satellite_id)
         features = state.attributes.get(ATTR_SUPPORTED_FEATURES, 0) if state else 0
+        media_id = self._media_id(message, language)
 
         if features & AssistSatelliteEntityFeature.START_CONVERSATION and (
             message.rstrip().endswith(_QUESTION_ENDINGS)
@@ -456,6 +522,7 @@ class HermesAssistEntity(
                         ATTR_ENTITY_ID: satellite_id,
                         "start_message": message,
                         "extra_system_prompt": message,
+                        **({"start_media_id": media_id} if media_id else {}),
                     },
                     blocking=True,
                 )
@@ -472,7 +539,11 @@ class HermesAssistEntity(
                 await self.hass.services.async_call(
                     "assist_satellite",
                     "announce",
-                    {ATTR_ENTITY_ID: satellite_id, "message": message},
+                    {
+                        ATTR_ENTITY_ID: satellite_id,
+                        "message": message,
+                        **({"media_id": media_id} if media_id else {}),
+                    },
                     blocking=True,
                 )
             except HomeAssistantError as err:
@@ -480,9 +551,7 @@ class HermesAssistEntity(
             else:
                 return
 
-        persistent_notification.async_create(
-            self.hass, message, title=NOTIFICATION_TITLE
-        )
+        persistent_notification.async_create(self.hass, message, title=NAME)
 
     async def _async_wait_for_idle(self, satellite_id: str) -> bool:
         """Wait until the satellite is idle so the delivery interrupts nothing."""

@@ -47,7 +47,7 @@ def chunk(
     return f"data: {json.dumps(payload)}\n\n"
 
 
-def event(name: str, data: dict[str, Any]) -> str:
+def event(name: str, data: Any) -> str:
     """Return one named SSE frame."""
     return f"event: {name}\ndata: {json.dumps(data)}\n\n"
 
@@ -118,7 +118,7 @@ async def test_stream_yields_visible_content_only(
 
     texts, session_id = await collect(client, session_key="homeassistant:assist")
 
-    assert texts == ["Hello", ", world."]
+    assert texts == ["Hello, world."]
     assert session_id == "session-1"
     method, url, payload, headers = aioclient_mock.mock_calls[0]
     assert method == "POST"
@@ -127,6 +127,43 @@ async def test_stream_yields_visible_content_only(
     assert headers["Authorization"] == f"Bearer {API_KEY}"
     assert headers["X-Hermes-Session-Key"] == "homeassistant:assist"
     assert "X-Hermes-Session-Id" not in headers
+
+
+async def test_stream_drops_text_before_a_tool_call(
+    client: HermesClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    tool = {"tool": "ha_call_service", "toolCallId": "call-1"}
+    body = (
+        chunk({"content": "Let me check the speakers."})
+        + event("hermes.tool.progress", {**tool, "status": "running"})
+        + event("hermes.tool.progress", {**tool, "status": "completed"})
+        + chunk({"content": "Now I know the fields."})
+        + event("hermes.tool.progress", "not an object")
+        + event("hermes.tool.progress", {**tool, "status": "running"})
+        + chunk({"content": "\n\nThe music is playing."})
+        + chunk(finish="stop")
+        + DONE
+    )
+    aioclient_mock.post(CHAT_URL, text=body, headers=SSE_HEADERS)
+
+    texts, _ = await collect(client)
+
+    assert texts == ["The music is playing."]
+
+
+async def test_stream_with_only_tool_narration_yields_nothing(
+    client: HermesClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    body = (
+        chunk({"content": "Let me check."})
+        + event("hermes.tool.progress", {"tool": "search", "status": "running"})
+        + DONE
+    )
+    aioclient_mock.post(CHAT_URL, text=body, headers=SSE_HEADERS)
+
+    texts, _ = await collect(client)
+
+    assert texts == []
 
 
 async def test_session_id_is_available_before_the_first_delta(

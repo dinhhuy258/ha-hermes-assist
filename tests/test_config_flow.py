@@ -30,6 +30,8 @@ from custom_components.hermes_assist.const import (
     ATTR_TEXT,
     CONF_API_KEY,
     CONF_HANDOFF_AFTER,
+    CONF_MESSAGE_HANDOFF,
+    CONF_MESSAGES,
     CONF_MODEL,
     CONF_PROMPT,
     CONF_RESET_PHRASES,
@@ -38,6 +40,7 @@ from custom_components.hermes_assist.const import (
     CONF_SESSION_MODE,
     CONF_TIMEOUT,
     CONF_URL,
+    DEFAULT_MESSAGES,
     DEFAULT_OPTIONS,
     DOMAIN,
     NAME,
@@ -469,6 +472,7 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
             CONF_RESET_PHRASES: "làm lại",
             CONF_HANDOFF_AFTER: 10,
             CONF_TIMEOUT: 300,
+            CONF_MESSAGES: {CONF_MESSAGE_HANDOFF: " Đang làm, xong sẽ báo lại. "},
         },
     )
     await hass.async_block_till_done()
@@ -484,6 +488,10 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
         CONF_RESET_PHRASES: "làm lại",
         CONF_HANDOFF_AFTER: 10,
         CONF_TIMEOUT: 300,
+        CONF_MESSAGES: {
+            **dict.fromkeys(DEFAULT_MESSAGES, ""),
+            CONF_MESSAGE_HANDOFF: "Đang làm, xong sẽ báo lại.",
+        },
     }
     assert isinstance(result["data"][CONF_TIMEOUT], int)
     assert len(setup_entry.subentries) == 2
@@ -514,6 +522,7 @@ async def test_add_agent_stores_cleared_text_fields_as_empty(
     assert result["data"][CONF_MODEL] == ""
     assert result["data"][CONF_SESSION_KEY] == ""
     assert result["data"][CONF_RESET_PHRASES] == ""
+    assert result["data"][CONF_MESSAGES] == dict.fromkeys(DEFAULT_MESSAGES, "")
 
 
 @pytest.mark.parametrize(
@@ -665,10 +674,13 @@ def test_translations_cover_every_form_field() -> None:
     assert "options" not in strings
     agent = strings["config_subentries"][SUBENTRY_TYPE_CONVERSATION]
     assert set(agent["initiate_flow"]) == {"user", "reconfigure"}
-    fields = {CONF_NAME, *DEFAULT_OPTIONS}
+    fields = {CONF_NAME, *DEFAULT_OPTIONS} - {CONF_MESSAGES}
     for step in ("user", "reconfigure"):
         assert set(agent["step"][step]["data"]) == fields
         assert set(agent["step"][step]["data_description"]) == fields
+        messages = agent["step"][step]["sections"][CONF_MESSAGES]
+        assert set(messages["data"]) == set(DEFAULT_MESSAGES)
+        assert set(messages["data_description"]) == set(DEFAULT_MESSAGES)
     assert set(agent["abort"]) == {"reconfigure_successful"}
     assert set(strings["selector"]["session_mode"]["options"]) == set(SESSION_MODES)
     assert set(strings["services"]["ask"]["fields"]) == {

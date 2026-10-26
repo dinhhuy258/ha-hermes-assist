@@ -13,6 +13,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     NumberSelector,
@@ -32,6 +33,7 @@ from .api import HermesAuthError, HermesClient, HermesError, normalize_url
 from .const import (
     CONF_API_KEY,
     CONF_HANDOFF_AFTER,
+    CONF_MESSAGES,
     CONF_MODEL,
     CONF_PROMPT,
     CONF_RESET_PHRASES,
@@ -40,6 +42,7 @@ from .const import (
     CONF_SESSION_MODE,
     CONF_TIMEOUT,
     CONF_URL,
+    DEFAULT_MESSAGES,
     DEFAULT_OPTIONS,
     DOMAIN,
     MAX_HANDOFF_AFTER,
@@ -109,6 +112,10 @@ AGENT_SCHEMA = vol.Schema(
             MIN_HANDOFF_AFTER, MAX_HANDOFF_AFTER
         ),
         vol.Required(CONF_TIMEOUT): _seconds(MIN_TIMEOUT, MAX_TIMEOUT, TIMEOUT_STEP),
+        vol.Optional(CONF_MESSAGES): section(
+            vol.Schema({vol.Optional(key): TextSelector() for key in DEFAULT_MESSAGES}),
+            {"collapsed": True},
+        ),
     }
 )
 
@@ -146,6 +153,10 @@ def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_RESET_PHRASES: user_input.get(CONF_RESET_PHRASES, "").strip(),
         CONF_HANDOFF_AFTER: int(user_input[CONF_HANDOFF_AFTER]),
         CONF_TIMEOUT: int(user_input[CONF_TIMEOUT]),
+        CONF_MESSAGES: {
+            key: user_input.get(CONF_MESSAGES, {}).get(key, "").strip()
+            for key in DEFAULT_MESSAGES
+        },
     }
 
 

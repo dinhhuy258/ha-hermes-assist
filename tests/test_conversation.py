@@ -2,7 +2,7 @@
 
 import asyncio
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -31,12 +31,17 @@ from custom_components.hermes_assist.const import (
     ATTR_SESSION_ID,
     ATTR_TEXT,
     CONF_HANDOFF_AFTER,
+    CONF_MESSAGE_CANNOT_CONNECT,
+    CONF_MESSAGE_HANDOFF,
+    CONF_MESSAGE_RESET,
+    CONF_MESSAGES,
     CONF_MODEL,
     CONF_PROMPT,
     CONF_SESSION_MODE,
     CONF_TIMEOUT,
     DEFAULT_OPTIONS,
     DOMAIN,
+    NAME,
     SERVICE_ASK,
     SESSION_MODE_PER_CONVERSATION,
     SUBENTRY_TYPE_CONVERSATION,
@@ -48,7 +53,6 @@ from custom_components.hermes_assist.messages import (
     ERROR_GENERIC,
     ERROR_TOO_LONG,
     HANDOFF_MESSAGE,
-    NOTIFICATION_TITLE,
     RESET_MESSAGE,
 )
 from custom_components.hermes_assist.prompts import (
@@ -63,6 +67,27 @@ START_CONVERSATION = AssistSatelliteEntityFeature.START_CONVERSATION
 NOTIFY = (
     "custom_components.hermes_assist.conversation.persistent_notification.async_create"
 )
+PIPELINES = (
+    "custom_components.hermes_assist.conversation.assist_pipeline.async_get_pipelines"
+)
+MEDIA_ID = "custom_components.hermes_assist.conversation.tts.generate_media_source_id"
+
+
+def pipeline(
+    language: str,
+    tts_engine: str | None = "tts.cloud",
+    tts_voice: str | None = None,
+    conversation_engine: str = ENTITY_ID,
+) -> SimpleNamespace:
+    """Return a stand-in for an Assist pipeline."""
+    return SimpleNamespace(
+        name=f"Pipeline {language}",
+        conversation_engine=conversation_engine,
+        language=language,
+        tts_engine=tts_engine,
+        tts_language=f"{language}-XX",
+        tts_voice=tts_voice,
+    )
 
 
 async def converse(
@@ -409,8 +434,103 @@ async def test_busy_satellite_falls_back_to_a_notification(
         stream.finish()
         await hass.async_block_till_done(wait_background_tasks=True)
 
-    notify.assert_called_once_with(hass, "All done.", title=NOTIFICATION_TITLE)
+    notify.assert_called_once_with(hass, "All done.", title=NAME)
     assert calls["announce"] == []
+
+
+async def test_spoken_messages_are_configurable(
+    hass: HomeAssistant, handoff_entry: MockConfigEntry, hermes: FakeHermes
+) -> None:
+    await set_options(
+        hass,
+        handoff_entry,
+        {
+            CONF_MESSAGES: {
+                CONF_MESSAGE_HANDOFF: "Đang làm, xong sẽ báo lại.",
+                CONF_MESSAGE_RESET: "",
+            }
+        },
+    )
+    hermes.stream()
+
+    handoff = await converse(hass, "Mở nhạc")
+    reset = await converse(hass, "Start over!")
+
+    assert speech(handoff) == "Đang làm, xong sẽ báo lại."
+    assert speech(reset) == RESET_MESSAGE
+
+
+async def test_late_answer_uses_the_tts_of_the_matching_pipeline(
+    hass: HomeAssistant, handoff_entry: MockConfigEntry, hermes: FakeHermes
+) -> None:
+    calls = satellite(hass, ANNOUNCE | START_CONVERSATION)
+    pipelines = [
+        pipeline("en", conversation_engine="conversation.other"),
+        pipeline("en", tts_engine=None),
+        pipeline("en"),
+        pipeline("vi", tts_voice="Charon"),
+    ]
+    first = hermes.stream()
+    second = hermes.stream()
+
+    with (
+        patch(PIPELINES, return_value=pipelines),
+        patch(MEDIA_ID, return_value="media-source://tts/cloud") as media_id,
+    ):
+        await converse(hass, "Mở nhạc", satellite_id=SATELLITE, language="vi")
+        first.push("Đã mở nhạc.")
+        first.finish()
+        await hass.async_block_till_done(wait_background_tasks=True)
+        await converse(hass, "Check", satellite_id=SATELLITE, language="vi")
+        second.push("Mở tiếp không?")
+        second.finish()
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    media_id.assert_called_with(
+        hass,
+        "Mở tiếp không?",
+        engine="tts.cloud",
+        language="vi-XX",
+        options={"voice": "Charon"},
+    )
+    assert [call.data for call in calls["announce"]] == [
+        {
+            "entity_id": SATELLITE,
+            "message": "Đã mở nhạc.",
+            "media_id": "media-source://tts/cloud",
+        }
+    ]
+    assert calls["start_conversation"][0].data["start_media_id"] == (
+        "media-source://tts/cloud"
+    )
+
+
+async def test_late_answer_falls_back_to_the_satellite_tts(
+    hass: HomeAssistant,
+    handoff_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await set_options(
+        hass,
+        handoff_entry,
+        {CONF_MESSAGES: {CONF_MESSAGE_CANNOT_CONNECT: "Không kết nối được Hermes."}},
+    )
+    calls = satellite(hass, ANNOUNCE)
+    stream = hermes.stream()
+
+    with (
+        patch(PIPELINES, return_value=[pipeline("en")]),
+        patch(MEDIA_ID, side_effect=HomeAssistantError("Invalid TTS provider")),
+    ):
+        await converse(hass, "Mở nhạc", satellite_id=SATELLITE, language="vi")
+        stream.fail(HermesConnectionError("Connection refused"))
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert [call.data for call in calls["announce"]] == [
+        {"entity_id": SATELLITE, "message": "Không kết nối được Hermes."}
+    ]
+    assert "Could not use the text to speech of pipeline Pipeline en" in caplog.text
 
 
 async def test_handoff_without_a_satellite_notifies(
@@ -424,7 +544,7 @@ async def test_handoff_without_a_satellite_notifies(
         stream.finish()
         await hass.async_block_till_done(wait_background_tasks=True)
 
-    notify.assert_called_once_with(hass, "All done.", title=NOTIFICATION_TITLE)
+    notify.assert_called_once_with(hass, "All done.", title=NAME)
 
 
 async def test_handoff_that_exceeds_the_timeout(
@@ -438,7 +558,7 @@ async def test_handoff_that_exceeds_the_timeout(
         await hass.async_block_till_done(wait_background_tasks=True)
 
     assert speech(result) == HANDOFF_MESSAGE
-    notify.assert_called_once_with(hass, ERROR_TOO_LONG, title=NOTIFICATION_TITLE)
+    notify.assert_called_once_with(hass, ERROR_TOO_LONG, title=NAME)
     assert stream.closed
 
 

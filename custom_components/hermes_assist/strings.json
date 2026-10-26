@@ -78,8 +78,32 @@
             "session_mode": "How long a Hermes session continues across requests.",
             "session_idle_timeout": "In idle mode, start a new session after this many seconds without a request.",
             "reset_phrases": "Comma-separated phrases that start a new Hermes session, for example: start over, new conversation.",
-            "handoff_after": "Seconds to wait for the first words of the answer before the satellite says it is working on it. 0 disables the hand-off.",
+            "handoff_after": "Seconds to wait for the answer before the satellite says it is working on it. 0 disables the hand-off.",
             "timeout": "Maximum time for one request, including a handed-off request."
+          },
+          "sections": {
+            "messages": {
+              "name": "Spoken messages",
+              "description": "Fixed sentences the satellite says. Write them in the language of the pipeline that uses this agent. Leave a field empty to use the English default.",
+              "data": {
+                "handoff_message": "Hand-off",
+                "reset_message": "New session",
+                "cannot_connect_message": "Cannot connect",
+                "auth_message": "API key rejected",
+                "error_message": "Hermes error",
+                "empty_message": "No answer",
+                "too_long_message": "Too long"
+              },
+              "data_description": {
+                "handoff_message": "Said when the answer is not ready within the hand-off time.",
+                "reset_message": "Said after a reset phrase.",
+                "cannot_connect_message": "Said when Hermes cannot be reached.",
+                "auth_message": "Said when Hermes rejects the API key.",
+                "error_message": "Said when Hermes returns an error.",
+                "empty_message": "Said when Hermes returns no answer.",
+                "too_long_message": "Said when the request takes longer than the timeout."
+              }
+            }
           }
         },
         "reconfigure": {
@@ -104,8 +128,32 @@
             "session_mode": "How long a Hermes session continues across requests.",
             "session_idle_timeout": "In idle mode, start a new session after this many seconds without a request.",
             "reset_phrases": "Comma-separated phrases that start a new Hermes session, for example: start over, new conversation.",
-            "handoff_after": "Seconds to wait for the first words of the answer before the satellite says it is working on it. 0 disables the hand-off.",
+            "handoff_after": "Seconds to wait for the answer before the satellite says it is working on it. 0 disables the hand-off.",
             "timeout": "Maximum time for one request, including a handed-off request."
+          },
+          "sections": {
+            "messages": {
+              "name": "Spoken messages",
+              "description": "Fixed sentences the satellite says. Write them in the language of the pipeline that uses this agent. Leave a field empty to use the English default.",
+              "data": {
+                "handoff_message": "Hand-off",
+                "reset_message": "New session",
+                "cannot_connect_message": "Cannot connect",
+                "auth_message": "API key rejected",
+                "error_message": "Hermes error",
+                "empty_message": "No answer",
+                "too_long_message": "Too long"
+              },
+              "data_description": {
+                "handoff_message": "Said when the answer is not ready within the hand-off time.",
+                "reset_message": "Said after a reset phrase.",
+                "cannot_connect_message": "Said when Hermes cannot be reached.",
+                "auth_message": "Said when Hermes rejects the API key.",
+                "error_message": "Said when Hermes returns an error.",
+                "empty_message": "Said when Hermes returns no answer.",
+                "too_long_message": "Said when the request takes longer than the timeout."
+              }
+            }
           }
         }
       },

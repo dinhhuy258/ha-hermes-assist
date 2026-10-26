@@ -2,6 +2,15 @@
 
 from typing import Any, Final
 
+from .messages import (
+    ERROR_AUTH,
+    ERROR_CANNOT_CONNECT,
+    ERROR_EMPTY,
+    ERROR_GENERIC,
+    ERROR_TOO_LONG,
+    HANDOFF_MESSAGE,
+    RESET_MESSAGE,
+)
 from .prompts import DEFAULT_PROMPT
 
 DOMAIN: Final = "hermes_assist"
@@ -17,6 +26,14 @@ CONF_SESSION_IDLE_TIMEOUT: Final = "session_idle_timeout"
 CONF_RESET_PHRASES: Final = "reset_phrases"
 CONF_HANDOFF_AFTER: Final = "handoff_after"
 CONF_TIMEOUT: Final = "timeout"
+CONF_MESSAGES: Final = "messages"
+CONF_MESSAGE_HANDOFF: Final = "handoff_message"
+CONF_MESSAGE_RESET: Final = "reset_message"
+CONF_MESSAGE_CANNOT_CONNECT: Final = "cannot_connect_message"
+CONF_MESSAGE_AUTH: Final = "auth_message"
+CONF_MESSAGE_GENERIC: Final = "error_message"
+CONF_MESSAGE_EMPTY: Final = "empty_message"
+CONF_MESSAGE_TOO_LONG: Final = "too_long_message"
 
 SESSION_MODE_KEEP: Final = "keep"
 SESSION_MODE_IDLE: Final = "idle"
@@ -34,6 +51,16 @@ DEFAULT_SESSION_IDLE_TIMEOUT: Final = 1800
 DEFAULT_RESET_PHRASES: Final = "start over, new conversation, reset conversation"
 DEFAULT_HANDOFF_AFTER: Final = 15
 DEFAULT_TIMEOUT: Final = 600
+# An empty or missing message falls back to its default.
+DEFAULT_MESSAGES: Final[dict[str, str]] = {
+    CONF_MESSAGE_HANDOFF: HANDOFF_MESSAGE,
+    CONF_MESSAGE_RESET: RESET_MESSAGE,
+    CONF_MESSAGE_CANNOT_CONNECT: ERROR_CANNOT_CONNECT,
+    CONF_MESSAGE_AUTH: ERROR_AUTH,
+    CONF_MESSAGE_GENERIC: ERROR_GENERIC,
+    CONF_MESSAGE_EMPTY: ERROR_EMPTY,
+    CONF_MESSAGE_TOO_LONG: ERROR_TOO_LONG,
+}
 
 MIN_SESSION_IDLE_TIMEOUT: Final = 60
 MAX_SESSION_IDLE_TIMEOUT: Final = 86400
@@ -52,6 +79,7 @@ DEFAULT_OPTIONS: Final[dict[str, Any]] = {
     CONF_RESET_PHRASES: DEFAULT_RESET_PHRASES,
     CONF_HANDOFF_AFTER: DEFAULT_HANDOFF_AFTER,
     CONF_TIMEOUT: DEFAULT_TIMEOUT,
+    CONF_MESSAGES: DEFAULT_MESSAGES,
 }
 
 STORAGE_VERSION: Final = 1

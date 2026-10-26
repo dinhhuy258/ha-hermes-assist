@@ -14,6 +14,7 @@ _LOGGER = logging.getLogger(__name__)
 
 HEADER_SESSION_ID = "X-Hermes-Session-Id"
 HEADER_SESSION_KEY = "X-Hermes-Session-Key"
+EVENT_TOOL_PROGRESS = "hermes.tool.progress"
 ERROR_BODY_LIMIT = 200
 _FORBIDDEN_ID_CHARACTERS = ("\r", "\n", "\0")
 
@@ -82,6 +83,15 @@ async def _iter_sse(content: AsyncIterable[bytes]) -> AsyncIterator[tuple[str, s
         yield event, "\n".join(data)
 
 
+def _is_tool_start(data: str) -> bool:
+    """Return whether a tool progress event reports a tool that starts running."""
+    try:
+        progress = json.loads(data)
+    except ValueError:
+        return False
+    return isinstance(progress, dict) and progress.get("status") == "running"
+
+
 class HermesStream:
     """The streamed answer of one chat completion request."""
 
@@ -93,23 +103,37 @@ class HermesStream:
         self.content_received = False
 
     async def __aiter__(self) -> AsyncIterator[str]:
-        """Yield the visible answer text, delta by delta."""
+        """Yield the answer once the stream ends.
+
+        The answer is the text after the last tool call. Text before a tool
+        call describes the work in progress, so it is dropped. Any text can
+        still be followed by a tool call, so nothing is yielded before the end.
+        """
+        parts: list[str] = []
         try:
             async with aclosing(_iter_sse(self._response.content)) as events:
                 async for event, data in events:
+                    if event == EVENT_TOOL_PROGRESS:
+                        if _is_tool_start(data):
+                            parts.clear()
+                        continue
                     if event != "message":
-                        # hermes.tool.progress, hermes.status, approval.request.
+                        # hermes.status, approval.request.
                         continue
                     if data.strip() == "[DONE]":
-                        return
-                    for text in self._handle_chunk(data):
-                        yield text
+                        break
+                    parts.extend(self._handle_chunk(data))
         except TimeoutError as err:
             raise HermesTimeoutError(
                 "Hermes did not finish the answer in time"
             ) from err
         except (aiohttp.ClientError, ValueError) as err:
+            # Keep the text that arrived before the break.
+            if text := "".join(parts).lstrip():
+                yield text
             raise HermesStreamError(f"The Hermes stream broke: {err}") from err
+        if text := "".join(parts).lstrip():
+            yield text
 
     def _handle_chunk(self, data: str) -> list[str]:
         """Return the visible text of one chunk and check its finish reason."""

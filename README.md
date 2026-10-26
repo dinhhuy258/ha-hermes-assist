@@ -1,15 +1,16 @@
 # Hermes Assist
 
 Hermes Assist is a Home Assistant custom integration that makes a [Hermes Agent](https://github.com/NousResearch/hermes-agent) API server the conversation agent of an Assist pipeline.
-Answers stream into the pipeline, so text to speech can start before Hermes has finished.
+Hermes Assist speaks only the final answer of Hermes, not the text Hermes writes before it calls a tool.
 
 ## Features
 
-- Streaming answers through the Hermes `/v1/chat/completions` endpoint.
+- Answers through the streaming Hermes `/v1/chat/completions` endpoint, without the text Hermes writes before a tool call.
 - Hermes-owned session continuity through `X-Hermes-Session-Id`, with three session modes.
 - Hand-off for long requests: the satellite says a short acknowledgement and the answer is delivered later.
 - Reset phrases that start a new Hermes session.
 - Device and area context in the system prompt, and the pipeline language passed to Hermes.
+- Spoken messages, such as the hand-off and error sentences, set per agent so each agent can speak its own language.
 - Markdown removed from spoken answers.
 - The `hermes_assist.ask` action for automations and scripts.
 
@@ -34,7 +35,7 @@ Setting up the integration creates one conversation agent, `conversation.hermes_
 
 1. Go to **Settings > Voice assistants** and open or create a pipeline.
 2. Select the Hermes agent as the conversation agent.
-3. Select a streaming text to speech engine to hear long answers sooner.
+3. Select a text to speech engine.
 
 ## Conversation agents
 
@@ -53,6 +54,7 @@ Reconfigure an agent from the three-dot menu of its row; deleting an agent remov
 | Reset phrases | `start over, new conversation, reset conversation` | Comma-separated phrases that start a new session. |
 | Hand off after | 15 s | 0 to 29 seconds; 0 disables the hand-off. |
 | Timeout | 600 s | 5 to 1800 seconds for one request, including a handed-off request. |
+| Spoken messages | English sentences | The hand-off, new session and error sentences. Write them in the language of the pipeline that uses the agent. An empty field uses the English default. |
 
 Changing the session key or the session mode of an agent clears its stored session.
 
@@ -67,13 +69,21 @@ Hermes does not expire sessions that are addressed by id, so the idle timeout is
 
 ## Long requests
 
-When Hermes has not started answering within **Hand off after**, the satellite says "I'm working on that. I'll let you know when it's done." and the request keeps running in the background.
+Hermes Assist reads the whole Hermes stream before it passes the answer on, because any text can still be followed by a tool call.
+The text after the last tool call is the answer.
+
+When the answer is not ready within **Hand off after**, the satellite says "I'm working on that. I'll let you know when it's done." and the request keeps running in the background.
+Each agent can replace this sentence under **Spoken messages**.
 
 When the answer is ready, Hermes Assist waits up to 60 seconds for the satellite to be idle and then delivers it:
 
 1. With `assist_satellite.start_conversation` when the answer ends with a question and the satellite supports it, so the reply continues the same Hermes session.
 2. With `assist_satellite.announce` when the satellite supports it.
 3. As a persistent notification otherwise.
+
+A spoken answer uses the text to speech engine, language and voice of a pipeline that uses this agent, preferably one in the language of the request.
+When no such pipeline exists, the satellite uses the text to speech of its own pipeline.
+After `start_conversation`, the satellite listens with its own pipeline, so the reply goes through the speech to text of that pipeline.
 
 If you speak again while a request is still streaming, the earlier request is dropped and nothing is announced later.
 
