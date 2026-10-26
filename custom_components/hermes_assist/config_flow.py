@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -32,6 +33,7 @@ from yarl import URL
 from .api import HermesAuthError, HermesClient, HermesError, normalize_url
 from .const import (
     CONF_API_KEY,
+    CONF_EXPOSED_ENTITIES,
     CONF_HANDOFF_AFTER,
     CONF_MESSAGES,
     CONF_MODEL,
@@ -112,6 +114,7 @@ AGENT_SCHEMA = vol.Schema(
             MIN_HANDOFF_AFTER, MAX_HANDOFF_AFTER
         ),
         vol.Required(CONF_TIMEOUT): _seconds(MIN_TIMEOUT, MAX_TIMEOUT, TIMEOUT_STEP),
+        vol.Optional(CONF_EXPOSED_ENTITIES): BooleanSelector(),
         vol.Optional(CONF_MESSAGES): section(
             vol.Schema({vol.Optional(key): TextSelector() for key in DEFAULT_MESSAGES}),
             {"collapsed": True},
@@ -153,6 +156,7 @@ def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_RESET_PHRASES: user_input.get(CONF_RESET_PHRASES, "").strip(),
         CONF_HANDOFF_AFTER: int(user_input[CONF_HANDOFF_AFTER]),
         CONF_TIMEOUT: int(user_input[CONF_TIMEOUT]),
+        CONF_EXPOSED_ENTITIES: bool(user_input.get(CONF_EXPOSED_ENTITIES, False)),
         CONF_MESSAGES: {
             key: user_input.get(CONF_MESSAGES, {}).get(key, "").strip()
             for key in DEFAULT_MESSAGES

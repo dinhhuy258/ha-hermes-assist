@@ -26,6 +26,7 @@ CONF_SESSION_IDLE_TIMEOUT: Final = "session_idle_timeout"
 CONF_RESET_PHRASES: Final = "reset_phrases"
 CONF_HANDOFF_AFTER: Final = "handoff_after"
 CONF_TIMEOUT: Final = "timeout"
+CONF_EXPOSED_ENTITIES: Final = "exposed_entities"
 CONF_MESSAGES: Final = "messages"
 CONF_MESSAGE_HANDOFF: Final = "handoff_message"
 CONF_MESSAGE_RESET: Final = "reset_message"
@@ -51,6 +52,7 @@ DEFAULT_SESSION_IDLE_TIMEOUT: Final = 1800
 DEFAULT_RESET_PHRASES: Final = "start over, new conversation, reset conversation"
 DEFAULT_HANDOFF_AFTER: Final = 15
 DEFAULT_TIMEOUT: Final = 600
+DEFAULT_EXPOSED_ENTITIES: Final = False
 # An empty or missing message falls back to its default.
 DEFAULT_MESSAGES: Final[dict[str, str]] = {
     CONF_MESSAGE_HANDOFF: HANDOFF_MESSAGE,
@@ -79,6 +81,7 @@ DEFAULT_OPTIONS: Final[dict[str, Any]] = {
     CONF_RESET_PHRASES: DEFAULT_RESET_PHRASES,
     CONF_HANDOFF_AFTER: DEFAULT_HANDOFF_AFTER,
     CONF_TIMEOUT: DEFAULT_TIMEOUT,
+    CONF_EXPOSED_ENTITIES: DEFAULT_EXPOSED_ENTITIES,
     CONF_MESSAGES: DEFAULT_MESSAGES,
 }
 

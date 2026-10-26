@@ -13,6 +13,9 @@ from homeassistant.components import (
     tts,
 )
 from homeassistant.components.assist_satellite import AssistSatelliteEntityFeature
+from homeassistant.components.homeassistant.exposed_entities import (
+    async_should_expose,
+)
 from homeassistant.config_entries import ConfigSubentry
 from homeassistant.const import (
     ATTR_ENTITY_ID,
@@ -23,7 +26,12 @@ from homeassistant.const import (
 )
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import area_registry as ar, device_registry as dr, intent
+from homeassistant.helpers import (
+    area_registry as ar,
+    device_registry as dr,
+    entity_registry as er,
+    intent,
+)
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
@@ -31,6 +39,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 from . import HermesAssistConfigEntry, conversation_subentries
 from .api import HermesAuthError, HermesConnectionError, HermesError, HermesTimeoutError
 from .const import (
+    CONF_EXPOSED_ENTITIES,
     CONF_HANDOFF_AFTER,
     CONF_MESSAGE_AUTH,
     CONF_MESSAGE_CANNOT_CONNECT,
@@ -45,6 +54,7 @@ from .const import (
     CONF_RESET_PHRASES,
     CONF_SESSION_KEY,
     CONF_TIMEOUT,
+    DEFAULT_EXPOSED_ENTITIES,
     DEFAULT_HANDOFF_AFTER,
     DEFAULT_MESSAGES,
     DEFAULT_RESET_PHRASES,
@@ -54,9 +64,7 @@ from .const import (
     NAME,
     SATELLITE_IDLE_TIMEOUT,
 )
-from .prompts import (
-    DEFAULT_PROMPT,
-)
+from .prompts import DEFAULT_PROMPT, EXPOSED_ENTITIES_INTRO
 from .session import SessionStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -270,9 +278,14 @@ class HermesAssistEntity(
         return messages
 
     def _build_prompt(self, user_input: conversation.ConversationInput) -> str:
-        """Combine the configured prompt with the context of this turn."""
+        """Combine the configured prompt with the context of this turn.
+
+        The exposed entities come right after the prompt so that the part of
+        the system message that is the same for every request stays a prefix.
+        """
         parts = [
             self._options.get(CONF_PROMPT, DEFAULT_PROMPT),
+            self._exposed_entities_context(),
             self._device_context(user_input),
         ]
         if user_input.language and user_input.language != MATCH_ALL:
@@ -280,6 +293,39 @@ class HermesAssistEntity(
         if user_input.extra_system_prompt:
             parts.append(user_input.extra_system_prompt)
         return "\n\n".join(part for part in parts if part)
+
+    def _exposed_entities_context(self) -> str:
+        """List the entities exposed to Assist: ID, name, aliases and area, no state."""
+        if not self._options.get(CONF_EXPOSED_ENTITIES, DEFAULT_EXPOSED_ENTITIES):
+            return ""
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+        area_registry = ar.async_get(self.hass)
+        lines: list[str] = []
+        for state in sorted(self.hass.states.async_all(), key=lambda s: s.entity_id):
+            if not async_should_expose(self.hass, conversation.DOMAIN, state.entity_id):
+                continue
+            line = f"- {state.entity_id}: {state.name}"
+            area_id: str | None = None
+            if entry := entity_registry.async_get(state.entity_id):
+                # Skip the computed-name entry: it repeats the name already listed.
+                if aliases := [
+                    alias.strip() for alias in entry.aliases if isinstance(alias, str)
+                ]:
+                    line += f" (aliases: {', '.join(aliases)})"
+                area_id = entry.area_id
+                if (
+                    area_id is None
+                    and entry.device_id
+                    and (device := device_registry.async_get(entry.device_id))
+                ):
+                    area_id = device.area_id
+            if area_id and (area := area_registry.async_get_area(area_id)):
+                line += f" in {area.name}"
+            lines.append(line)
+        if not lines:
+            return ""
+        return "\n".join([EXPOSED_ENTITIES_INTRO, *lines])
 
     def _device_context(self, user_input: conversation.ConversationInput) -> str:
         """Describe the voice device that heard the request, and its area."""

@@ -10,6 +10,7 @@ Hermes Assist speaks only the final answer of Hermes, not the text Hermes writes
 - Hand-off for long requests: the satellite says a short acknowledgement and the answer is delivered later.
 - Reset phrases that start a new Hermes session.
 - Device and area context in the system prompt, and the pipeline language passed to Hermes.
+- Optional list of the entities exposed to Assist (ID, name, aliases, area) in the system prompt, so the agent can act without looking entities up first.
 - Spoken messages, such as the hand-off and error sentences, set per agent so each agent can speak its own language.
 - Markdown removed from spoken answers.
 - The `hermes_assist.ask` action for automations and scripts.
@@ -54,6 +55,7 @@ Reconfigure an agent from the three-dot menu of its row; deleting an agent remov
 | Reset phrases | `start over, new conversation, reset conversation` | Comma-separated phrases that start a new session. |
 | Hand off after | 15 s | 0 to 29 seconds; 0 disables the hand-off. |
 | Timeout | 600 s | 5 to 1800 seconds for one request, including a handed-off request. |
+| Exposed entities | Off | Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, one bullet per entity. No states are sent. |
 | Spoken messages | English sentences | The hand-off, new session and error sentences. Write them in the language of the pipeline that uses the agent. An empty field uses the English default. |
 
 Changing the session key or the session mode of an agent clears its stored session.
@@ -105,6 +107,7 @@ Pass `session_id` to use a specific Hermes session for one call, and `agent_id` 
 
 - The API key is stored in the config entry and is never logged.
 - Hermes receives the system prompt, the device and area name and the user text; no entity states are sent.
+- With **Exposed entities** on, Hermes also receives the ID, name, aliases and area of every entity exposed to Assist.
 - Anyone who can call Home Assistant actions can call `hermes_assist.ask`.
 - TLS certificate verification is always on.
 

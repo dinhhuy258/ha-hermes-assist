@@ -29,6 +29,7 @@ from custom_components.hermes_assist.const import (
     ATTR_SESSION_ID,
     ATTR_TEXT,
     CONF_API_KEY,
+    CONF_EXPOSED_ENTITIES,
     CONF_HANDOFF_AFTER,
     CONF_MESSAGE_HANDOFF,
     CONF_MESSAGES,
@@ -472,6 +473,7 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
             CONF_RESET_PHRASES: "làm lại",
             CONF_HANDOFF_AFTER: 10,
             CONF_TIMEOUT: 300,
+            CONF_EXPOSED_ENTITIES: True,
             CONF_MESSAGES: {CONF_MESSAGE_HANDOFF: " Đang làm, xong sẽ báo lại. "},
         },
     )
@@ -488,6 +490,7 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
         CONF_RESET_PHRASES: "làm lại",
         CONF_HANDOFF_AFTER: 10,
         CONF_TIMEOUT: 300,
+        CONF_EXPOSED_ENTITIES: True,
         CONF_MESSAGES: {
             **dict.fromkeys(DEFAULT_MESSAGES, ""),
             CONF_MESSAGE_HANDOFF: "Đang làm, xong sẽ báo lại.",
@@ -523,6 +526,7 @@ async def test_add_agent_stores_cleared_text_fields_as_empty(
     assert result["data"][CONF_SESSION_KEY] == ""
     assert result["data"][CONF_RESET_PHRASES] == ""
     assert result["data"][CONF_MESSAGES] == dict.fromkeys(DEFAULT_MESSAGES, "")
+    assert result["data"][CONF_EXPOSED_ENTITIES] is False
 
 
 @pytest.mark.parametrize(

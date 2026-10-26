@@ -8,10 +8,18 @@ from unittest.mock import patch
 
 from homeassistant.components import conversation
 from homeassistant.components.assist_satellite import AssistSatelliteEntityFeature
+from homeassistant.components.homeassistant.exposed_entities import (
+    async_expose_entity,
+)
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigSubentry
 from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers import area_registry as ar, device_registry as dr, intent
+from homeassistant.helpers import (
+    area_registry as ar,
+    device_registry as dr,
+    entity_registry as er,
+    intent,
+)
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -30,6 +38,7 @@ from custom_components.hermes_assist.const import (
     ATTR_AGENT_ID,
     ATTR_SESSION_ID,
     ATTR_TEXT,
+    CONF_EXPOSED_ENTITIES,
     CONF_HANDOFF_AFTER,
     CONF_MESSAGE_CANNOT_CONNECT,
     CONF_MESSAGE_HANDOFF,
@@ -57,6 +66,7 @@ from custom_components.hermes_assist.messages import (
 )
 from custom_components.hermes_assist.prompts import (
     DEFAULT_PROMPT,
+    EXPOSED_ENTITIES_INTRO,
 )
 
 from .conftest import ENTITY_ID, SUBENTRY_ID, FakeHermes, set_options
@@ -252,6 +262,83 @@ async def test_prompt_has_device_area_language_and_extra_prompt(
     assert "'Here' means the Kitchen." in system["content"]
     assert "Reply in the language with code 'en'." in system["content"]
     assert system["content"].endswith("The user set a timer earlier.")
+
+
+async def expose_fixtures(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    """Create two exposed entities, one with a device area, and one hidden one."""
+    area = ar.async_get(hass).async_create("Living room")
+    registry = er.async_get(hass)
+    light = registry.async_get_or_create(
+        "light", "test", "light-1", suggested_object_id="f1_living_room_light"
+    )
+    registry.async_update_entity(
+        light.entity_id, area_id=area.id, aliases=["living room light", "main light"]
+    )
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("test", "fan-1")},
+        name="Ceiling fan",
+    )
+    dr.async_get(hass).async_update_device(device.id, area_id=area.id)
+    fan = registry.async_get_or_create(
+        "fan",
+        "test",
+        "fan-1",
+        suggested_object_id="f1_living_room_fan",
+        device_id=device.id,
+    )
+    hass.states.async_set(light.entity_id, "off", {"friendly_name": "Light"})
+    hass.states.async_set(fan.entity_id, "off", {"friendly_name": "Fan"})
+    hass.states.async_set("switch.plain", "on", {"friendly_name": "Plain switch"})
+    hass.states.async_set("light.hidden", "on", {"friendly_name": "Hidden"})
+    for entity_id, exposed in (
+        (light.entity_id, True),
+        (fan.entity_id, True),
+        ("switch.plain", True),
+        ("light.hidden", False),
+    ):
+        async_expose_entity(hass, conversation.DOMAIN, entity_id, exposed)
+
+
+async def test_exposed_entities_are_listed_when_enabled(
+    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
+) -> None:
+    await set_options(hass, setup_entry, {CONF_EXPOSED_ENTITIES: True})
+    await expose_fixtures(hass, setup_entry)
+    stream = hermes.stream()
+    stream.push("Done.")
+    stream.finish()
+
+    await converse(hass, "Turn on the living room light")
+
+    system = hermes.calls[0]["messages"][0]["content"]
+    assert system.startswith(DEFAULT_PROMPT)
+    assert (
+        "\n- light.f1_living_room_light: Light"
+        " (aliases: living room light, main light) in Living room\n"
+    ) in system
+    assert "\n- fan.f1_living_room_fan: Fan in Living room\n" in system
+    assert "\n- switch.plain: Plain switch" in system
+    assert "light.hidden" not in system
+    assert "conversation.hermes_assist" not in system
+    assert system.index(EXPOSED_ENTITIES_INTRO) < system.index(
+        "Reply in the language with code 'en'."
+    )
+
+
+async def test_exposed_entities_are_off_by_default(
+    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
+) -> None:
+    await expose_fixtures(hass, setup_entry)
+    stream = hermes.stream()
+    stream.push("Done.")
+    stream.finish()
+
+    await converse(hass, "Turn on the living room light")
+
+    system = hermes.calls[0]["messages"][0]["content"]
+    assert EXPOSED_ENTITIES_INTRO not in system
+    assert "light.f1_living_room_light" not in system
 
 
 async def test_reset_phrase_starts_a_new_session(

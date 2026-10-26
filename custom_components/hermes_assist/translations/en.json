@@ -68,7 +68,8 @@
             "session_idle_timeout": "Session idle timeout",
             "reset_phrases": "Reset phrases",
             "handoff_after": "Hand off after",
-            "timeout": "Timeout"
+            "timeout": "Timeout",
+            "exposed_entities": "Exposed entities"
           },
           "data_description": {
             "name": "Name of the conversation entity and its device.",
@@ -79,7 +80,8 @@
             "session_idle_timeout": "In idle mode, start a new session after this many seconds without a request.",
             "reset_phrases": "Comma-separated phrases that start a new Hermes session, for example: start over, new conversation.",
             "handoff_after": "Seconds to wait for the answer before the satellite says it is working on it. 0 disables the hand-off.",
-            "timeout": "Maximum time for one request, including a handed-off request."
+            "timeout": "Maximum time for one request, including a handed-off request.",
+            "exposed_entities": "Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, so the agent can act on them without looking them up first. No states are sent."
           },
           "sections": {
             "messages": {
@@ -118,7 +120,8 @@
             "session_idle_timeout": "Session idle timeout",
             "reset_phrases": "Reset phrases",
             "handoff_after": "Hand off after",
-            "timeout": "Timeout"
+            "timeout": "Timeout",
+            "exposed_entities": "Exposed entities"
           },
           "data_description": {
             "name": "Name of the conversation entity and its device.",
@@ -129,7 +132,8 @@
             "session_idle_timeout": "In idle mode, start a new session after this many seconds without a request.",
             "reset_phrases": "Comma-separated phrases that start a new Hermes session, for example: start over, new conversation.",
             "handoff_after": "Seconds to wait for the answer before the satellite says it is working on it. 0 disables the hand-off.",
-            "timeout": "Maximum time for one request, including a handed-off request."
+            "timeout": "Maximum time for one request, including a handed-off request.",
+            "exposed_entities": "Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, so the agent can act on them without looking them up first. No states are sent."
           },
           "sections": {
             "messages": {

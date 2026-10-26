@@ -10,3 +10,9 @@ DEFAULT_PROMPT: Final = (
     "Do not describe what you are about to do before using a tool; "
     "use the tool and then answer."
 )
+
+EXPOSED_ENTITIES_INTRO = (
+    "Entities exposed to Assist, one bullet per entity as "
+    "entity_id: name (aliases: ...) in area. "
+    "Act on them with these entity IDs directly instead of looking entities up first."
+)
