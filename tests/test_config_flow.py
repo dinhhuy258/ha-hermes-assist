@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import re
 from types import MappingProxyType
 from typing import Any
 from unittest.mock import patch
@@ -811,6 +812,22 @@ async def test_changing_the_session_scope_of_an_unloaded_agent_clears_sessions(
 
 
 COMPONENT = Path(__file__).parent.parent / "custom_components" / DOMAIN
+
+
+def _texts(node: Any) -> list[str]:
+    """Return every string in a translation tree."""
+    if isinstance(node, dict):
+        return [text for value in node.values() for text in _texts(value)]
+    return [node] if isinstance(node, str) else []
+
+
+def test_translation_placeholders_are_identifiers() -> None:
+    """Braces are placeholders in Home Assistant strings, as hassfest checks."""
+    strings = json.loads((COMPONENT / "strings.json").read_text())
+
+    for text in _texts(strings):
+        for placeholder in re.findall(r"\{([^{}]*)\}", text):
+            assert re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", placeholder), text
 
 
 def test_translations_cover_every_form_field() -> None:

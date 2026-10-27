@@ -73,7 +73,7 @@
           },
           "data_description": {
             "name": "Name of the conversation entity and its device.",
-            "prompt": "System prompt sent with every voice request. It is a Home Assistant template, so {{ states('sensor.x') }} and the other template functions work. Device, area and language context is added after it.",
+            "prompt": "System prompt sent with every voice request. It is rendered as a Home Assistant template, so template functions such as states() work. Device, area and language context is added after it.",
             "model": "Model sent to Hermes. The list comes from the server; you can also type a name. Leave empty to use the Hermes default.",
             "session_key": "Sent as X-Hermes-Session-Key to select the Hermes memory scope. Leave empty to send no key.",
             "session_mode": "How long a Hermes session continues across requests.",
@@ -115,7 +115,7 @@
           },
           "data_description": {
             "name": "Name of the conversation entity and its device.",
-            "prompt": "System prompt sent with every voice request. It is a Home Assistant template, so {{ states('sensor.x') }} and the other template functions work. Device, area and language context is added after it.",
+            "prompt": "System prompt sent with every voice request. It is rendered as a Home Assistant template, so template functions such as states() work. Device, area and language context is added after it.",
             "model": "Model sent to Hermes. The list comes from the server; you can also type a name. Leave empty to use the Hermes default.",
             "session_key": "Sent as X-Hermes-Session-Key to select the Hermes memory scope. Leave empty to send no key.",
             "session_mode": "How long a Hermes session continues across requests.",
@@ -145,7 +145,7 @@
         "reconfigure_successful": "The conversation agent was updated."
       },
       "error": {
-        "invalid_template": "The prompt is not a valid template. Check the {{ }} and {% %} syntax."
+        "invalid_template": "The prompt is not a valid Home Assistant template. Check its template syntax."
       }
     }
   },
