@@ -23,19 +23,22 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
+import voluptuous as vol
 
 from custom_components.hermes_assist.const import (
     ATTR_AGENT_ID,
+    ATTR_CAMERA_ENTITY_ID,
     ATTR_SESSION_ID,
+    ATTR_SYSTEM_PROMPT,
     ATTR_TEXT,
     CONF_API_KEY,
-    CONF_EXPOSED_ENTITIES,
     CONF_HANDOFF_AFTER,
+    CONF_LIST_EXPOSED_ENTITIES,
     CONF_MESSAGE_HANDOFF,
     CONF_MESSAGES,
     CONF_MODEL,
     CONF_PROMPT,
-    CONF_RESET_PHRASES,
+    CONF_REASONING_EFFORT,
     CONF_SESSION_IDLE_TIMEOUT,
     CONF_SESSION_KEY,
     CONF_SESSION_MODE,
@@ -45,6 +48,7 @@ from custom_components.hermes_assist.const import (
     DEFAULT_OPTIONS,
     DOMAIN,
     NAME,
+    REASONING_EFFORTS,
     SESSION_MODE_KEEP,
     SESSION_MODES,
     SUBENTRY_TYPE_CONVERSATION,
@@ -58,14 +62,30 @@ from .conftest import (
     MODELS_RESPONSE,
     MODELS_URL,
     SUBENTRY_ID,
+    subentry_data,
 )
 
 NEW_URL = "https://hermes-new.example.com"
 
 
+def model_options(schema: vol.Schema) -> list[str]:
+    """Return the dropdown options of the model field of an agent form."""
+    for key, selector in schema.schema.items():
+        if key == CONF_MODEL:
+            return [
+                option if isinstance(option, str) else option["value"]
+                for option in selector.config["options"]
+            ]
+    raise AssertionError("model field missing")
+
+
 def agent_input(**changes: Any) -> dict[str, Any]:
     """Return a complete agent form submission."""
-    return {CONF_NAME: NAME, **DEFAULT_OPTIONS, **changes}
+    data = {CONF_NAME: NAME, **DEFAULT_OPTIONS, **changes}
+    if not data[CONF_REASONING_EFFORT]:
+        # The frontend leaves a cleared dropdown out of the submission.
+        del data[CONF_REASONING_EFFORT]
+    return data
 
 
 async def flush_storage(hass: HomeAssistant) -> None:
@@ -433,6 +453,52 @@ async def test_migrates_a_version_1_entry_that_never_loaded(
     assert hass.states.get(ENTITY_ID) is not None
 
 
+async def test_migrates_minor_version_1_option_names(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    aioclient_mock.get(MODELS_URL, json=MODELS_RESPONSE)
+    old_options = {
+        key: value
+        for key, value in DEFAULT_OPTIONS.items()
+        if key != CONF_LIST_EXPOSED_ENTITIES
+    }
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=NAME,
+        version=2,
+        minor_version=1,
+        data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
+        subentries_data=[
+            subentry_data(
+                **{
+                    **old_options,
+                    "exposed_entities": True,
+                    "reset_phrases": "start over",
+                    CONF_MESSAGES: {
+                        **old_options[CONF_MESSAGES],
+                        "reset_message": "Okay.",
+                        "auth_message": "Bad key.",
+                        "too_long_message": "Too slow.",
+                    },
+                }
+            ),
+            subentry_data("Bare", "agent-2", **old_options),
+        ],
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.minor_version == 2
+    first = entry.subentries[SUBENTRY_ID].data
+    assert first[CONF_LIST_EXPOSED_ENTITIES] is True
+    assert "exposed_entities" not in first
+    assert "reset_phrases" not in first
+    assert first[CONF_MESSAGES] == DEFAULT_MESSAGES
+    assert entry.subentries["agent-2"].data[CONF_LIST_EXPOSED_ENTITIES] is False
+
+
 async def test_a_future_version_is_not_migrated(hass: HomeAssistant) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -470,10 +536,10 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
             CONF_SESSION_KEY: "homeassistant:vi",
             CONF_SESSION_MODE: SESSION_MODE_KEEP,
             CONF_SESSION_IDLE_TIMEOUT: 900,
-            CONF_RESET_PHRASES: "làm lại",
             CONF_HANDOFF_AFTER: 10,
             CONF_TIMEOUT: 300,
-            CONF_EXPOSED_ENTITIES: True,
+            CONF_LIST_EXPOSED_ENTITIES: True,
+            CONF_REASONING_EFFORT: "high",
             CONF_MESSAGES: {CONF_MESSAGE_HANDOFF: " Đang làm, xong sẽ báo lại. "},
         },
     )
@@ -487,10 +553,10 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
         CONF_SESSION_KEY: "homeassistant:vi",
         CONF_SESSION_MODE: SESSION_MODE_KEEP,
         CONF_SESSION_IDLE_TIMEOUT: 900,
-        CONF_RESET_PHRASES: "làm lại",
         CONF_HANDOFF_AFTER: 10,
         CONF_TIMEOUT: 300,
-        CONF_EXPOSED_ENTITIES: True,
+        CONF_LIST_EXPOSED_ENTITIES: True,
+        CONF_REASONING_EFFORT: "high",
         CONF_MESSAGES: {
             **dict.fromkeys(DEFAULT_MESSAGES, ""),
             CONF_MESSAGE_HANDOFF: "Đang làm, xong sẽ báo lại.",
@@ -524,9 +590,9 @@ async def test_add_agent_stores_cleared_text_fields_as_empty(
     assert result["data"][CONF_PROMPT] == ""
     assert result["data"][CONF_MODEL] == ""
     assert result["data"][CONF_SESSION_KEY] == ""
-    assert result["data"][CONF_RESET_PHRASES] == ""
     assert result["data"][CONF_MESSAGES] == dict.fromkeys(DEFAULT_MESSAGES, "")
-    assert result["data"][CONF_EXPOSED_ENTITIES] is False
+    assert result["data"][CONF_LIST_EXPOSED_ENTITIES] is False
+    assert result["data"][CONF_REASONING_EFFORT] == ""
 
 
 @pytest.mark.parametrize(
@@ -539,6 +605,7 @@ async def test_add_agent_stores_cleared_text_fields_as_empty(
         (CONF_TIMEOUT, 4),
         (CONF_TIMEOUT, 1801),
         (CONF_SESSION_MODE, "forever"),
+        (CONF_REASONING_EFFORT, "extreme"),
     ],
 )
 async def test_add_agent_rejects_out_of_range_values(
@@ -550,6 +617,98 @@ async def test_add_agent_rejects_out_of_range_values(
         await hass.config_entries.subentries.async_configure(
             result["flow_id"], agent_input(**{field: value})
         )
+
+
+async def test_add_agent_rejects_a_broken_template(
+    hass: HomeAssistant, setup_entry: MockConfigEntry
+) -> None:
+    result = await start_add_agent(hass, setup_entry)
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], agent_input(**{CONF_PROMPT: "Hello {{ states("})
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_PROMPT: "invalid_template"}
+    assert len(setup_entry.subentries) == 1
+
+
+async def test_reconfigure_agent_rejects_a_broken_template(
+    hass: HomeAssistant, setup_entry: MockConfigEntry
+) -> None:
+    result = await setup_entry.start_subentry_reconfigure_flow(hass, SUBENTRY_ID)
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], agent_input(**{CONF_PROMPT: "{% if %}"})
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_PROMPT: "invalid_template"}
+    assert (
+        setup_entry.subentries[SUBENTRY_ID].data[CONF_PROMPT]
+        == (DEFAULT_OPTIONS[CONF_PROMPT])
+    )
+
+
+async def test_agent_form_offers_the_models_of_the_server(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(
+        MODELS_URL,
+        json={"object": "list", "data": [{"id": "hermes-agent"}, {"id": "gpt-5"}]},
+    )
+
+    result = await start_add_agent(hass, setup_entry)
+
+    assert model_options(result["data_schema"]) == ["hermes-agent", "gpt-5"]
+
+    result = await setup_entry.start_subentry_reconfigure_flow(hass, SUBENTRY_ID)
+    assert model_options(result["data_schema"]) == ["hermes-agent", "gpt-5"]
+
+
+async def test_agent_form_accepts_a_model_that_is_not_listed(
+    hass: HomeAssistant, setup_entry: MockConfigEntry
+) -> None:
+    result = await start_add_agent(hass, setup_entry)
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], agent_input(**{CONF_MODEL: "my-custom-model"})
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_MODEL] == "my-custom-model"
+
+
+async def test_agent_form_opens_when_the_model_list_fails(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(MODELS_URL, status=500)
+
+    result = await start_add_agent(hass, setup_entry)
+
+    assert result["type"] is FlowResultType.FORM
+    assert model_options(result["data_schema"]) == []
+
+
+async def test_agent_form_of_an_unloaded_entry_fetches_the_models(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    assert await hass.config_entries.async_unload(setup_entry.entry_id)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(MODELS_URL, json={"data": [{"id": "only-model"}]})
+
+    result = await setup_entry.start_subentry_reconfigure_flow(hass, SUBENTRY_ID)
+
+    assert model_options(result["data_schema"]) == ["only-model"]
 
 
 async def test_reconfigure_agent_saves_all_fields(
@@ -686,9 +845,15 @@ def test_translations_cover_every_form_field() -> None:
         assert set(messages["data"]) == set(DEFAULT_MESSAGES)
         assert set(messages["data_description"]) == set(DEFAULT_MESSAGES)
     assert set(agent["abort"]) == {"reconfigure_successful"}
+    assert set(agent["error"]) == {"invalid_template"}
     assert set(strings["selector"]["session_mode"]["options"]) == set(SESSION_MODES)
+    assert set(strings["selector"]["reasoning_effort"]["options"]) == set(
+        REASONING_EFFORTS
+    )
     assert set(strings["services"]["ask"]["fields"]) == {
         ATTR_TEXT,
         ATTR_SESSION_ID,
         ATTR_AGENT_ID,
+        ATTR_SYSTEM_PROMPT,
+        ATTR_CAMERA_ENTITY_ID,
     }

@@ -3,13 +3,8 @@
 from typing import Any, Final
 
 from .messages import (
-    ERROR_AUTH,
-    ERROR_CANNOT_CONNECT,
-    ERROR_EMPTY,
     ERROR_GENERIC,
-    ERROR_TOO_LONG,
     HANDOFF_MESSAGE,
-    RESET_MESSAGE,
 )
 from .prompts import DEFAULT_PROMPT
 
@@ -23,18 +18,13 @@ CONF_MODEL: Final = "model"
 CONF_SESSION_KEY: Final = "session_key"
 CONF_SESSION_MODE: Final = "session_mode"
 CONF_SESSION_IDLE_TIMEOUT: Final = "session_idle_timeout"
-CONF_RESET_PHRASES: Final = "reset_phrases"
 CONF_HANDOFF_AFTER: Final = "handoff_after"
 CONF_TIMEOUT: Final = "timeout"
-CONF_EXPOSED_ENTITIES: Final = "exposed_entities"
+CONF_LIST_EXPOSED_ENTITIES: Final = "list_exposed_entities"
+CONF_REASONING_EFFORT: Final = "reasoning_effort"
 CONF_MESSAGES: Final = "messages"
 CONF_MESSAGE_HANDOFF: Final = "handoff_message"
-CONF_MESSAGE_RESET: Final = "reset_message"
-CONF_MESSAGE_CANNOT_CONNECT: Final = "cannot_connect_message"
-CONF_MESSAGE_AUTH: Final = "auth_message"
 CONF_MESSAGE_GENERIC: Final = "error_message"
-CONF_MESSAGE_EMPTY: Final = "empty_message"
-CONF_MESSAGE_TOO_LONG: Final = "too_long_message"
 
 SESSION_MODE_KEEP: Final = "keep"
 SESSION_MODE_IDLE: Final = "idle"
@@ -45,23 +35,31 @@ SESSION_MODES: Final = [
     SESSION_MODE_PER_CONVERSATION,
 ]
 
+# The values Hermes accepts for model_options.reasoning_effort.
+REASONING_EFFORTS: Final = [
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "ultra",
+]
+
 DEFAULT_MODEL: Final = ""
 DEFAULT_SESSION_KEY: Final = "homeassistant:assist"
 DEFAULT_SESSION_MODE: Final = SESSION_MODE_IDLE
 DEFAULT_SESSION_IDLE_TIMEOUT: Final = 1800
-DEFAULT_RESET_PHRASES: Final = "start over, new conversation, reset conversation"
 DEFAULT_HANDOFF_AFTER: Final = 15
 DEFAULT_TIMEOUT: Final = 600
-DEFAULT_EXPOSED_ENTITIES: Final = False
+DEFAULT_LIST_EXPOSED_ENTITIES: Final = False
+# Empty means the Hermes default.
+DEFAULT_REASONING_EFFORT: Final = ""
 # An empty or missing message falls back to its default.
 DEFAULT_MESSAGES: Final[dict[str, str]] = {
     CONF_MESSAGE_HANDOFF: HANDOFF_MESSAGE,
-    CONF_MESSAGE_RESET: RESET_MESSAGE,
-    CONF_MESSAGE_CANNOT_CONNECT: ERROR_CANNOT_CONNECT,
-    CONF_MESSAGE_AUTH: ERROR_AUTH,
     CONF_MESSAGE_GENERIC: ERROR_GENERIC,
-    CONF_MESSAGE_EMPTY: ERROR_EMPTY,
-    CONF_MESSAGE_TOO_LONG: ERROR_TOO_LONG,
 }
 
 MIN_SESSION_IDLE_TIMEOUT: Final = 60
@@ -78,10 +76,10 @@ DEFAULT_OPTIONS: Final[dict[str, Any]] = {
     CONF_SESSION_KEY: DEFAULT_SESSION_KEY,
     CONF_SESSION_MODE: DEFAULT_SESSION_MODE,
     CONF_SESSION_IDLE_TIMEOUT: DEFAULT_SESSION_IDLE_TIMEOUT,
-    CONF_RESET_PHRASES: DEFAULT_RESET_PHRASES,
     CONF_HANDOFF_AFTER: DEFAULT_HANDOFF_AFTER,
     CONF_TIMEOUT: DEFAULT_TIMEOUT,
-    CONF_EXPOSED_ENTITIES: DEFAULT_EXPOSED_ENTITIES,
+    CONF_LIST_EXPOSED_ENTITIES: DEFAULT_LIST_EXPOSED_ENTITIES,
+    CONF_REASONING_EFFORT: DEFAULT_REASONING_EFFORT,
     CONF_MESSAGES: DEFAULT_MESSAGES,
 }
 
@@ -99,3 +97,5 @@ SERVICE_ASK: Final = "ask"
 ATTR_TEXT: Final = "text"
 ATTR_SESSION_ID: Final = "session_id"
 ATTR_AGENT_ID: Final = "agent_id"
+ATTR_SYSTEM_PROMPT: Final = "system_prompt"
+ATTR_CAMERA_ENTITY_ID: Final = "camera_entity_id"

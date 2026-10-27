@@ -66,22 +66,22 @@
             "session_key": "Session key",
             "session_mode": "Session mode",
             "session_idle_timeout": "Session idle timeout",
-            "reset_phrases": "Reset phrases",
             "handoff_after": "Hand off after",
             "timeout": "Timeout",
-            "exposed_entities": "Exposed entities"
+            "list_exposed_entities": "List exposed entities in the prompt",
+            "reasoning_effort": "Reasoning effort"
           },
           "data_description": {
             "name": "Name of the conversation entity and its device.",
-            "prompt": "System prompt sent with every voice request. Device, area and language context is added after it.",
-            "model": "Model name sent to Hermes. Leave empty to use the Hermes default.",
+            "prompt": "System prompt sent with every voice request. It is a Home Assistant template, so {{ states('sensor.x') }} and the other template functions work. Device, area and language context is added after it.",
+            "model": "Model sent to Hermes. The list comes from the server; you can also type a name. Leave empty to use the Hermes default.",
             "session_key": "Sent as X-Hermes-Session-Key to select the Hermes memory scope. Leave empty to send no key.",
             "session_mode": "How long a Hermes session continues across requests.",
             "session_idle_timeout": "In idle mode, start a new session after this many seconds without a request.",
-            "reset_phrases": "Comma-separated phrases that start a new Hermes session, for example: start over, new conversation.",
             "handoff_after": "Seconds to wait for the answer before the satellite says it is working on it. 0 disables the hand-off.",
             "timeout": "Maximum time for one request, including a handed-off request.",
-            "exposed_entities": "Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, so the agent can act on them without looking them up first. No states are sent."
+            "list_exposed_entities": "Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, so the agent can act on them without looking them up first. No states are sent.",
+            "reasoning_effort": "How much the model thinks before it answers. Leave empty to use the Hermes default."
           },
           "sections": {
             "messages": {
@@ -89,21 +89,11 @@
               "description": "Fixed sentences the satellite says. Write them in the language of the pipeline that uses this agent. Leave a field empty to use the English default.",
               "data": {
                 "handoff_message": "Hand-off",
-                "reset_message": "New session",
-                "cannot_connect_message": "Cannot connect",
-                "auth_message": "API key rejected",
-                "error_message": "Hermes error",
-                "empty_message": "No answer",
-                "too_long_message": "Too long"
+                "error_message": "Hermes error"
               },
               "data_description": {
                 "handoff_message": "Said when the answer is not ready within the hand-off time.",
-                "reset_message": "Said after a reset phrase.",
-                "cannot_connect_message": "Said when Hermes cannot be reached.",
-                "auth_message": "Said when Hermes rejects the API key.",
-                "error_message": "Said when Hermes returns an error.",
-                "empty_message": "Said when Hermes returns no answer.",
-                "too_long_message": "Said when the request takes longer than the timeout."
+                "error_message": "Said when a request fails: Hermes cannot be reached, rejects the API key, returns an error or no answer, or takes longer than the timeout. The cause is written to the log."
               }
             }
           }
@@ -118,22 +108,22 @@
             "session_key": "Session key",
             "session_mode": "Session mode",
             "session_idle_timeout": "Session idle timeout",
-            "reset_phrases": "Reset phrases",
             "handoff_after": "Hand off after",
             "timeout": "Timeout",
-            "exposed_entities": "Exposed entities"
+            "list_exposed_entities": "List exposed entities in the prompt",
+            "reasoning_effort": "Reasoning effort"
           },
           "data_description": {
             "name": "Name of the conversation entity and its device.",
-            "prompt": "System prompt sent with every voice request. Device, area and language context is added after it.",
-            "model": "Model name sent to Hermes. Leave empty to use the Hermes default.",
+            "prompt": "System prompt sent with every voice request. It is a Home Assistant template, so {{ states('sensor.x') }} and the other template functions work. Device, area and language context is added after it.",
+            "model": "Model sent to Hermes. The list comes from the server; you can also type a name. Leave empty to use the Hermes default.",
             "session_key": "Sent as X-Hermes-Session-Key to select the Hermes memory scope. Leave empty to send no key.",
             "session_mode": "How long a Hermes session continues across requests.",
             "session_idle_timeout": "In idle mode, start a new session after this many seconds without a request.",
-            "reset_phrases": "Comma-separated phrases that start a new Hermes session, for example: start over, new conversation.",
             "handoff_after": "Seconds to wait for the answer before the satellite says it is working on it. 0 disables the hand-off.",
             "timeout": "Maximum time for one request, including a handed-off request.",
-            "exposed_entities": "Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, so the agent can act on them without looking them up first. No states are sent."
+            "list_exposed_entities": "Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, so the agent can act on them without looking them up first. No states are sent.",
+            "reasoning_effort": "How much the model thinks before it answers. Leave empty to use the Hermes default."
           },
           "sections": {
             "messages": {
@@ -141,21 +131,11 @@
               "description": "Fixed sentences the satellite says. Write them in the language of the pipeline that uses this agent. Leave a field empty to use the English default.",
               "data": {
                 "handoff_message": "Hand-off",
-                "reset_message": "New session",
-                "cannot_connect_message": "Cannot connect",
-                "auth_message": "API key rejected",
-                "error_message": "Hermes error",
-                "empty_message": "No answer",
-                "too_long_message": "Too long"
+                "error_message": "Hermes error"
               },
               "data_description": {
                 "handoff_message": "Said when the answer is not ready within the hand-off time.",
-                "reset_message": "Said after a reset phrase.",
-                "cannot_connect_message": "Said when Hermes cannot be reached.",
-                "auth_message": "Said when Hermes rejects the API key.",
-                "error_message": "Said when Hermes returns an error.",
-                "empty_message": "Said when Hermes returns no answer.",
-                "too_long_message": "Said when the request takes longer than the timeout."
+                "error_message": "Said when a request fails: Hermes cannot be reached, rejects the API key, returns an error or no answer, or takes longer than the timeout. The cause is written to the log."
               }
             }
           }
@@ -163,10 +143,32 @@
       },
       "abort": {
         "reconfigure_successful": "The conversation agent was updated."
+      },
+      "error": {
+        "invalid_template": "The prompt is not a valid template. Check the {{ }} and {% %} syntax."
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "reset_session": {
+        "name": "Reset session"
       }
     }
   },
   "selector": {
+    "reasoning_effort": {
+      "options": {
+        "none": "None",
+        "minimal": "Minimal",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra high",
+        "max": "Maximum",
+        "ultra": "Ultra"
+      }
+    },
     "session_mode": {
       "options": {
         "keep": "Keep one session",
@@ -178,7 +180,7 @@
   "services": {
     "ask": {
       "name": "Ask",
-      "description": "Sends text to Hermes and returns the whole answer. Does not stream and does not hand off.",
+      "description": "Sends text to Hermes with the prompt of the agent and returns the whole answer. Does not stream and does not hand off.",
       "fields": {
         "text": {
           "name": "Text",
@@ -191,6 +193,14 @@
         "agent_id": {
           "name": "Agent",
           "description": "The Hermes conversation agent to ask. Required only when more than one agent exists."
+        },
+        "camera_entity_id": {
+          "name": "Camera",
+          "description": "Sends a snapshot of this camera with the text, so Hermes can describe what it sees."
+        },
+        "system_prompt": {
+          "name": "System prompt",
+          "description": "Replaces the prompt of the agent for this call. It is sent as written, not rendered as a template. The exposed entities of the agent are still added."
         }
       }
     }

@@ -8,12 +8,12 @@ Hermes Assist speaks only the final answer of Hermes, not the text Hermes writes
 - Answers through the streaming Hermes `/v1/chat/completions` endpoint, without the text Hermes writes before a tool call.
 - Hermes-owned session continuity through `X-Hermes-Session-Id`, with three session modes.
 - Hand-off for long requests: the satellite says a short acknowledgement and the answer is delivered later.
-- Reset phrases that start a new Hermes session.
-- Device and area context in the system prompt, and the pipeline language passed to Hermes.
+- The prompt is a Home Assistant template, rendered on every request; device, area and language context is added after it.
 - Optional list of the entities exposed to Assist (ID, name, aliases, area) in the system prompt, so the agent can act without looking entities up first.
 - Spoken messages, such as the hand-off and error sentences, set per agent so each agent can speak its own language.
 - Markdown removed from spoken answers.
-- The `hermes_assist.ask` action for automations and scripts.
+- The `hermes_assist.ask` action for automations and scripts, with the agent prompt, an optional replacement prompt and an optional camera snapshot.
+- A **Reset session** button on each agent device.
 
 ## Requirements
 
@@ -47,16 +47,16 @@ Reconfigure an agent from the three-dot menu of its row; deleting an agent remov
 | Option | Default | Description |
 |---|---|---|
 | Name | `Hermes Assist` | Name of the conversation entity and its device. |
-| Prompt | Smart-speaker prompt | System prompt sent with every voice request. |
-| Model | Empty | Sent as `model` only when set. |
+| Prompt | Smart-speaker prompt | System prompt sent with every request. Rendered as a Home Assistant template, so `{{ states('sensor.x') }}` and the other template functions work. A prompt with a syntax error is rejected when saving; one that fails at runtime is sent as written and logged. |
+| Model | Empty | Chosen from the models of the server, or typed. Sent as `model` only when set. |
 | Session key | `homeassistant:assist` | Sent as `X-Hermes-Session-Key` to select the Hermes memory scope. Agents that share a key share Hermes memory. |
 | Session mode | `idle` | `keep`, `idle` or `per_conversation`. |
 | Session idle timeout | 1800 s | Used only in `idle` mode, 60 to 86400 seconds. |
-| Reset phrases | `start over, new conversation, reset conversation` | Comma-separated phrases that start a new session. |
 | Hand off after | 15 s | 0 to 29 seconds; 0 disables the hand-off. |
 | Timeout | 600 s | 5 to 1800 seconds for one request, including a handed-off request. |
-| Exposed entities | Off | Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, one bullet per entity. No states are sent. |
-| Spoken messages | English sentences | The hand-off, new session and error sentences. Write them in the language of the pipeline that uses the agent. An empty field uses the English default. |
+| List exposed entities in the prompt | Off | Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, one bullet per entity. No states are sent. |
+| Reasoning effort | Empty | One of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, sent as `model_options.reasoning_effort`. Empty uses the Hermes default. |
+| Spoken messages | English sentences | The hand-off sentence and the one error sentence said for every failure; the cause of a failure is logged. Write them in the language of the pipeline that uses the agent. An empty field uses the English default. |
 
 Changing the session key or the session mode of an agent clears its stored session.
 
@@ -68,6 +68,8 @@ Changing the session key or the session mode of an agent clears its stored sessi
 
 The session id of each agent lives in `.storage/hermes_assist.<subentry_id>`.
 Hermes does not expire sessions that are addressed by id, so the idle timeout is the only expiry.
+
+Each agent device has a **Reset session** button that forgets every stored session of the agent, from the UI or from an automation with `button.press`.
 
 ## Long requests
 
@@ -92,6 +94,7 @@ If you speak again while a request is still streaming, the earlier request is dr
 ## Action: `hermes_assist.ask`
 
 The action sends text to Hermes and returns the whole answer without streaming or hand-off.
+It sends the prompt of the agent and, when the option is on, the exposed entities, like a voice request; no device or language sentence is added.
 
 ```yaml
 action: hermes_assist.ask
@@ -101,13 +104,31 @@ response_variable: hermes
 ```
 
 The response is `{"text": "...", "session_id": "..."}`.
-Pass `session_id` to use a specific Hermes session for one call, and `agent_id` (the conversation entity, for example `conversation.hermes_assist`) when more than one agent exists.
+
+| Field | Description |
+|---|---|
+| `text` | The request. Required. |
+| `system_prompt` | Replaces the prompt of the agent for this call. Sent as written, not rendered as a template; render it in the automation first if needed. |
+| `camera_entity_id` | A camera whose current snapshot is sent with the text, so Hermes can describe what it sees. |
+| `session_id` | A Hermes session to use for this call only. The stored session is left unchanged. |
+| `agent_id` | The conversation entity, for example `conversation.hermes_assist`. Required when more than one agent exists. |
+
+```yaml
+action: hermes_assist.ask
+data:
+  text: "Is there a parcel at the door? Answer yes or no."
+  system_prompt: "You describe camera images in one short sentence."
+  camera_entity_id: camera.front_door
+response_variable: hermes
+```
 
 ## Privacy and security
 
 - The API key is stored in the config entry and is never logged.
 - Hermes receives the system prompt, the device and area name and the user text; no entity states are sent.
-- With **Exposed entities** on, Hermes also receives the ID, name, aliases and area of every entity exposed to Assist.
+- With **List exposed entities in the prompt** on, Hermes also receives the ID, name, aliases and area of every entity exposed to Assist.
+- With `camera_entity_id`, Hermes receives the camera snapshot.
+- A template in the prompt can read any state or attribute; what it renders is sent to Hermes.
 - Anyone who can call Home Assistant actions can call `hermes_assist.ask`.
 - TLS certificate verification is always on.
 

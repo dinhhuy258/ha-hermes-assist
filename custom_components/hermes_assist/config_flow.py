@@ -6,6 +6,7 @@ from typing import Any
 
 from homeassistant.config_entries import (
     ConfigEntry,
+    ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
     ConfigSubentryFlow,
@@ -33,12 +34,12 @@ from yarl import URL
 from .api import HermesAuthError, HermesClient, HermesError, normalize_url
 from .const import (
     CONF_API_KEY,
-    CONF_EXPOSED_ENTITIES,
     CONF_HANDOFF_AFTER,
+    CONF_LIST_EXPOSED_ENTITIES,
     CONF_MESSAGES,
     CONF_MODEL,
     CONF_PROMPT,
-    CONF_RESET_PHRASES,
+    CONF_REASONING_EFFORT,
     CONF_SESSION_IDLE_TIMEOUT,
     CONF_SESSION_KEY,
     CONF_SESSION_MODE,
@@ -54,10 +55,12 @@ from .const import (
     MIN_SESSION_IDLE_TIMEOUT,
     MIN_TIMEOUT,
     NAME,
+    REASONING_EFFORTS,
     SESSION_MODES,
     SUBENTRY_TYPE_CONVERSATION,
     TIMEOUT_STEP,
 )
+from .context import validate_prompt
 from .session import async_clear_sessions
 
 _LOGGER = logging.getLogger(__name__)
@@ -93,34 +96,50 @@ def _seconds(minimum: int, maximum: int, step: int = 1) -> NumberSelector:
     )
 
 
-AGENT_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_NAME): TextSelector(),
-        vol.Optional(CONF_PROMPT): TextSelector(TextSelectorConfig(multiline=True)),
-        vol.Optional(CONF_MODEL): TextSelector(),
-        vol.Optional(CONF_SESSION_KEY): TextSelector(),
-        vol.Required(CONF_SESSION_MODE): SelectSelector(
-            SelectSelectorConfig(
-                options=SESSION_MODES,
-                mode=SelectSelectorMode.DROPDOWN,
-                translation_key=CONF_SESSION_MODE,
-            )
-        ),
-        vol.Required(CONF_SESSION_IDLE_TIMEOUT): _seconds(
-            MIN_SESSION_IDLE_TIMEOUT, MAX_SESSION_IDLE_TIMEOUT
-        ),
-        vol.Optional(CONF_RESET_PHRASES): TextSelector(),
-        vol.Required(CONF_HANDOFF_AFTER): _seconds(
-            MIN_HANDOFF_AFTER, MAX_HANDOFF_AFTER
-        ),
-        vol.Required(CONF_TIMEOUT): _seconds(MIN_TIMEOUT, MAX_TIMEOUT, TIMEOUT_STEP),
-        vol.Optional(CONF_EXPOSED_ENTITIES): BooleanSelector(),
-        vol.Optional(CONF_MESSAGES): section(
-            vol.Schema({vol.Optional(key): TextSelector() for key in DEFAULT_MESSAGES}),
-            {"collapsed": True},
-        ),
-    }
-)
+def agent_schema(models: list[str]) -> vol.Schema:
+    """Return the agent form; the model dropdown lists the models of the server."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_NAME): TextSelector(),
+            vol.Optional(CONF_PROMPT): TextSelector(TextSelectorConfig(multiline=True)),
+            vol.Optional(CONF_MODEL): SelectSelector(
+                SelectSelectorConfig(
+                    options=models, mode=SelectSelectorMode.DROPDOWN, custom_value=True
+                )
+            ),
+            vol.Optional(CONF_SESSION_KEY): TextSelector(),
+            vol.Required(CONF_SESSION_MODE): SelectSelector(
+                SelectSelectorConfig(
+                    options=SESSION_MODES,
+                    mode=SelectSelectorMode.DROPDOWN,
+                    translation_key=CONF_SESSION_MODE,
+                )
+            ),
+            vol.Required(CONF_SESSION_IDLE_TIMEOUT): _seconds(
+                MIN_SESSION_IDLE_TIMEOUT, MAX_SESSION_IDLE_TIMEOUT
+            ),
+            vol.Required(CONF_HANDOFF_AFTER): _seconds(
+                MIN_HANDOFF_AFTER, MAX_HANDOFF_AFTER
+            ),
+            vol.Required(CONF_TIMEOUT): _seconds(
+                MIN_TIMEOUT, MAX_TIMEOUT, TIMEOUT_STEP
+            ),
+            vol.Optional(CONF_LIST_EXPOSED_ENTITIES): BooleanSelector(),
+            vol.Optional(CONF_REASONING_EFFORT): SelectSelector(
+                SelectSelectorConfig(
+                    options=REASONING_EFFORTS,
+                    mode=SelectSelectorMode.DROPDOWN,
+                    translation_key=CONF_REASONING_EFFORT,
+                )
+            ),
+            vol.Optional(CONF_MESSAGES): section(
+                vol.Schema(
+                    {vol.Optional(key): TextSelector() for key in DEFAULT_MESSAGES}
+                ),
+                {"collapsed": True},
+            ),
+        }
+    )
 
 
 def _is_valid_url(url: str) -> bool:
@@ -153,10 +172,12 @@ def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_SESSION_KEY: user_input.get(CONF_SESSION_KEY, "").strip(),
         CONF_SESSION_MODE: user_input[CONF_SESSION_MODE],
         CONF_SESSION_IDLE_TIMEOUT: int(user_input[CONF_SESSION_IDLE_TIMEOUT]),
-        CONF_RESET_PHRASES: user_input.get(CONF_RESET_PHRASES, "").strip(),
         CONF_HANDOFF_AFTER: int(user_input[CONF_HANDOFF_AFTER]),
         CONF_TIMEOUT: int(user_input[CONF_TIMEOUT]),
-        CONF_EXPOSED_ENTITIES: bool(user_input.get(CONF_EXPOSED_ENTITIES, False)),
+        CONF_LIST_EXPOSED_ENTITIES: bool(
+            user_input.get(CONF_LIST_EXPOSED_ENTITIES, False)
+        ),
+        CONF_REASONING_EFFORT: user_input.get(CONF_REASONING_EFFORT) or "",
         CONF_MESSAGES: {
             key: user_input.get(CONF_MESSAGES, {}).get(key, "").strip()
             for key in DEFAULT_MESSAGES
@@ -168,7 +189,7 @@ class HermesAssistConfigFlow(ConfigFlow, domain=DOMAIN):
     """Set up a Hermes Agent API server."""
 
     VERSION = 2
-    MINOR_VERSION = 1
+    MINOR_VERSION = 2
 
     @classmethod
     @callback
@@ -269,20 +290,47 @@ class HermesAssistConfigFlow(ConfigFlow, domain=DOMAIN):
 class HermesAgentSubentryFlow(ConfigSubentryFlow):
     """Add or reconfigure one conversation agent."""
 
+    async def _async_models(self) -> list[str]:
+        """Return the models of the server, or none when they cannot be fetched."""
+        entry = self._get_entry()
+        if entry.state is ConfigEntryState.LOADED:
+            client = entry.runtime_data.client
+        else:
+            client = HermesClient(
+                async_get_clientsession(self.hass),
+                entry.data[CONF_URL],
+                entry.data[CONF_API_KEY],
+            )
+        try:
+            return await client.async_list_models()
+        except HermesError as err:
+            _LOGGER.debug("Could not list the Hermes models: %s", err)
+            return []
+
+    def _errors(self, options: dict[str, Any]) -> dict[str, str]:
+        """Return the form errors of a submission."""
+        if not validate_prompt(self.hass, options[CONF_PROMPT]):
+            return {CONF_PROMPT: "invalid_template"}
+        return {}
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
         """Create an agent with its name and options."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(
-                title=user_input[CONF_NAME].strip() or NAME,
-                data=_options_from_input(user_input),
-            )
+            options = _options_from_input(user_input)
+            if not (errors := self._errors(options)):
+                return self.async_create_entry(
+                    title=user_input[CONF_NAME].strip() or NAME, data=options
+                )
         return self.async_show_form(
             step_id="user",
             data_schema=self.add_suggested_values_to_schema(
-                AGENT_SCHEMA, {CONF_NAME: NAME, **DEFAULT_OPTIONS}
+                agent_schema(await self._async_models()),
+                user_input or {CONF_NAME: NAME, **DEFAULT_OPTIONS},
             ),
+            errors=errors,
         )
 
     async def async_step_reconfigure(
@@ -292,23 +340,27 @@ class HermesAgentSubentryFlow(ConfigSubentryFlow):
         entry = self._get_entry()
         subentry = self._get_reconfigure_subentry()
         current = {**DEFAULT_OPTIONS, **subentry.data}
+        errors: dict[str, str] = {}
         if user_input is not None:
             options = _options_from_input(user_input)
-            if (
-                options[CONF_SESSION_KEY] != current[CONF_SESSION_KEY]
-                or options[CONF_SESSION_MODE] != current[CONF_SESSION_MODE]
-            ):
-                # Never continue a session under a different memory scope.
-                await async_clear_sessions(self.hass, entry, subentry.subentry_id)
-            return self.async_update_and_abort(
-                entry,
-                subentry,
-                title=user_input[CONF_NAME].strip() or subentry.title,
-                data=options,
-            )
+            if not (errors := self._errors(options)):
+                if (
+                    options[CONF_SESSION_KEY] != current[CONF_SESSION_KEY]
+                    or options[CONF_SESSION_MODE] != current[CONF_SESSION_MODE]
+                ):
+                    # Never continue a session under a different memory scope.
+                    await async_clear_sessions(self.hass, entry, subentry.subentry_id)
+                return self.async_update_and_abort(
+                    entry,
+                    subentry,
+                    title=user_input[CONF_NAME].strip() or subentry.title,
+                    data=options,
+                )
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=self.add_suggested_values_to_schema(
-                AGENT_SCHEMA, {CONF_NAME: subentry.title, **current}
+                agent_schema(await self._async_models()),
+                user_input or {CONF_NAME: subentry.title, **current},
             ),
+            errors=errors,
         )

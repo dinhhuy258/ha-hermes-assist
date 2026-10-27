@@ -3,6 +3,7 @@
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.components import camera
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.core import (
     HomeAssistant,
@@ -24,9 +25,12 @@ from .api import (
 )
 from .const import (
     ATTR_AGENT_ID,
+    ATTR_CAMERA_ENTITY_ID,
     ATTR_SESSION_ID,
+    ATTR_SYSTEM_PROMPT,
     ATTR_TEXT,
     CONF_MODEL,
+    CONF_REASONING_EFFORT,
     CONF_SESSION_KEY,
     CONF_TIMEOUT,
     DEFAULT_SESSION_KEY,
@@ -35,6 +39,7 @@ from .const import (
     SERVICE_ASK,
     SUBENTRY_TYPE_CONVERSATION,
 )
+from .context import build_messages
 from .messages import (
     ERROR_AUTH,
     ERROR_CANNOT_CONNECT,
@@ -59,6 +64,8 @@ ASK_SCHEMA = vol.Schema(
         vol.Required(ATTR_TEXT): cv.string,
         vol.Optional(ATTR_SESSION_ID): _session_id,
         vol.Optional(ATTR_AGENT_ID): cv.entity_id,
+        vol.Optional(ATTR_SYSTEM_PROMPT): cv.string,
+        vol.Optional(ATTR_CAMERA_ENTITY_ID): cv.entity_domain(camera.DOMAIN),
     }
 )
 
@@ -70,7 +77,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def async_ask(call: ServiceCall) -> ServiceResponse:
         """Send text to Hermes and return the whole answer.
 
-        The service does not stream and does not hand off; it waits up to the
+        The agent prompt and its exposed entities are sent like for a voice
+        request; system_prompt replaces the agent prompt for this call. The
+        service does not stream and does not hand off; it waits up to the
         configured timeout. A given session_id is used for this call only and
         leaves the stored session unchanged.
         """
@@ -80,12 +89,28 @@ def async_setup_services(hass: HomeAssistant) -> None:
         options = subentry.data
         override: str | None = call.data.get(ATTR_SESSION_ID)
         timeout = float(options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT))
+        image: tuple[str, bytes] | None = None
+        if camera_id := call.data.get(ATTR_CAMERA_ENTITY_ID):
+            try:
+                snapshot = await camera.async_get_image(hass, camera_id)
+            except HomeAssistantError as err:
+                raise HomeAssistantError(
+                    f"Could not get an image from {camera_id}: {err}"
+                ) from err
+            image = (snapshot.content_type, snapshot.content)
         try:
             async with (
                 asyncio.timeout(timeout),
                 data.client.stream_chat(
-                    [{"role": "user", "content": call.data[ATTR_TEXT]}],
+                    build_messages(
+                        hass,
+                        options,
+                        call.data[ATTR_TEXT],
+                        prompt=call.data.get(ATTR_SYSTEM_PROMPT),
+                        image=image,
+                    ),
                     model=options.get(CONF_MODEL) or None,
+                    reasoning_effort=options.get(CONF_REASONING_EFFORT) or None,
                     session_key=options.get(CONF_SESSION_KEY, DEFAULT_SESSION_KEY)
                     or None,
                     session_id=override or store.get(None),

@@ -83,7 +83,7 @@ class FakeHermes:
 
     @asynccontextmanager
     async def stream_chat(
-        self, messages: list[dict[str, str]], **kwargs: Any
+        self, messages: list[dict[str, Any]], **kwargs: Any
     ) -> AsyncIterator[FakeStream]:
         """Record the request and hand out the next prepared stream."""
         self.calls.append({"messages": messages, **kwargs})

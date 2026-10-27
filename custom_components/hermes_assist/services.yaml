@@ -16,3 +16,13 @@ ask:
         entity:
           integration: hermes_assist
           domain: conversation
+    system_prompt:
+      example: "You summarize sensor data in one sentence."
+      selector:
+        text:
+          multiline: true
+    camera_entity_id:
+      example: camera.front_door
+      selector:
+        entity:
+          domain: camera

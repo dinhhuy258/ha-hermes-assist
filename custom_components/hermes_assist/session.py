@@ -122,10 +122,6 @@ class SessionStore:
         self._last_used = _now()
         self._schedule_save()
 
-    def reset(self, conversation_id: str | None) -> None:
-        """Forget the session so the next request starts a new one."""
-        self.set(conversation_id, None)
-
     async def async_clear(self) -> None:
         """Forget every session and delete the storage file."""
         self._session_id = None

@@ -13,9 +13,6 @@ from homeassistant.components import (
     tts,
 )
 from homeassistant.components.assist_satellite import AssistSatelliteEntityFeature
-from homeassistant.components.homeassistant.exposed_entities import (
-    async_should_expose,
-)
 from homeassistant.config_entries import ConfigSubentry
 from homeassistant.const import (
     ATTR_ENTITY_ID,
@@ -27,44 +24,32 @@ from homeassistant.const import (
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import (
-    area_registry as ar,
-    device_registry as dr,
-    entity_registry as er,
     intent,
 )
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 
 from . import HermesAssistConfigEntry, conversation_subentries
 from .api import HermesAuthError, HermesConnectionError, HermesError, HermesTimeoutError
 from .const import (
-    CONF_EXPOSED_ENTITIES,
     CONF_HANDOFF_AFTER,
-    CONF_MESSAGE_AUTH,
-    CONF_MESSAGE_CANNOT_CONNECT,
-    CONF_MESSAGE_EMPTY,
     CONF_MESSAGE_GENERIC,
     CONF_MESSAGE_HANDOFF,
-    CONF_MESSAGE_RESET,
-    CONF_MESSAGE_TOO_LONG,
     CONF_MESSAGES,
     CONF_MODEL,
-    CONF_PROMPT,
-    CONF_RESET_PHRASES,
+    CONF_REASONING_EFFORT,
     CONF_SESSION_KEY,
     CONF_TIMEOUT,
-    DEFAULT_EXPOSED_ENTITIES,
     DEFAULT_HANDOFF_AFTER,
     DEFAULT_MESSAGES,
-    DEFAULT_RESET_PHRASES,
     DEFAULT_SESSION_KEY,
     DEFAULT_TIMEOUT,
     DOMAIN,
     NAME,
     SATELLITE_IDLE_TIMEOUT,
 )
-from .prompts import DEFAULT_PROMPT, EXPOSED_ENTITIES_INTRO
+from .context import build_messages
+from .device import agent_device_info
 from .session import SessionStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -122,11 +107,6 @@ def _speakable(text: str) -> str:
     return " ".join(_SymbolStripper()(text).split())
 
 
-def _normalize(text: str) -> str:
-    """Lowercase and drop punctuation, since speech to text output varies."""
-    return " ".join(re.sub(r"[^\w\s']", " ", text.lower()).split())
-
-
 def _same_language(first: str | None, second: str | None) -> bool:
     """Return whether two language codes share their base language."""
     if not first or not second:
@@ -135,12 +115,6 @@ def _same_language(first: str | None, second: str | None) -> bool:
         first.replace("_", "-").split("-")[0].lower()
         == second.replace("_", "-").split("-")[0].lower()
     )
-
-
-def _is_reset(text: str, phrases: str) -> bool:
-    """Return whether the utterance is one of the comma-separated reset phrases."""
-    wanted = {_normalize(phrase) for phrase in phrases.split(",")} - {""}
-    return _normalize(text) in wanted
 
 
 async def _async_collect(
@@ -169,13 +143,7 @@ class HermesAssistEntity(
         self.entry = entry
         self.subentry = subentry
         self._attr_unique_id = subentry.subentry_id
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, subentry.subentry_id)},
-            name=subentry.title,
-            manufacturer="Nous Research",
-            model="Hermes Agent",
-            entry_type=DeviceEntryType.SERVICE,
-        )
+        self._attr_device_info = agent_device_info(subentry)
         # Satellite entity id -> (question delivered late, its conversation id).
         self._follow_ups: dict[str, tuple[str, str]] = {}
         self._warned_missing_session = False
@@ -219,13 +187,6 @@ class HermesAssistEntity(
         options = self._options
         conversation_id = chat_log.conversation_id
 
-        reset_phrases = options.get(CONF_RESET_PHRASES, DEFAULT_RESET_PHRASES)
-        if _is_reset(user_input.text, reset_phrases):
-            self._store.reset(conversation_id)
-            if user_input.satellite_id:
-                self._follow_ups.pop(user_input.satellite_id, None)
-            return self._reply(user_input, chat_log, self._message(CONF_MESSAGE_RESET))
-
         self._link_follow_up(user_input, conversation_id)
         deadline = self.hass.loop.time() + float(
             options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
@@ -264,87 +225,23 @@ class HermesAssistEntity(
         self._store.touch(conversation_id)
         last = chat_log.content[-1]
         if not isinstance(last, conversation.AssistantContent) or not last.content:
-            return self._error(user_input, chat_log, self._message(CONF_MESSAGE_EMPTY))
+            _LOGGER.warning("Hermes returned no answer")
+            return self._error(
+                user_input, chat_log, self._message(CONF_MESSAGE_GENERIC)
+            )
         return conversation.async_get_result_from_chat_log(user_input, chat_log)
 
     def _messages(
         self, user_input: conversation.ConversationInput
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         """Return the system and user messages of this turn."""
-        messages: list[dict[str, str]] = []
-        if prompt := self._build_prompt(user_input):
-            messages.append({"role": "system", "content": prompt})
-        messages.append({"role": "user", "content": user_input.text})
-        return messages
-
-    def _build_prompt(self, user_input: conversation.ConversationInput) -> str:
-        """Combine the configured prompt with the context of this turn.
-
-        The exposed entities come right after the prompt so that the part of
-        the system message that is the same for every request stays a prefix.
-        """
-        parts = [
-            self._options.get(CONF_PROMPT, DEFAULT_PROMPT),
-            self._exposed_entities_context(),
-            self._device_context(user_input),
-        ]
-        if user_input.language and user_input.language != MATCH_ALL:
-            parts.append(f"Reply in the language with code '{user_input.language}'.")
-        if user_input.extra_system_prompt:
-            parts.append(user_input.extra_system_prompt)
-        return "\n\n".join(part for part in parts if part)
-
-    def _exposed_entities_context(self) -> str:
-        """List the entities exposed to Assist: ID, name, aliases and area, no state."""
-        if not self._options.get(CONF_EXPOSED_ENTITIES, DEFAULT_EXPOSED_ENTITIES):
-            return ""
-        entity_registry = er.async_get(self.hass)
-        device_registry = dr.async_get(self.hass)
-        area_registry = ar.async_get(self.hass)
-        lines: list[str] = []
-        for state in sorted(self.hass.states.async_all(), key=lambda s: s.entity_id):
-            if not async_should_expose(self.hass, conversation.DOMAIN, state.entity_id):
-                continue
-            line = f"- {state.entity_id}: {state.name}"
-            area_id: str | None = None
-            if entry := entity_registry.async_get(state.entity_id):
-                # Skip the computed-name entry: it repeats the name already listed.
-                if aliases := [
-                    alias.strip() for alias in entry.aliases if isinstance(alias, str)
-                ]:
-                    line += f" (aliases: {', '.join(aliases)})"
-                area_id = entry.area_id
-                if (
-                    area_id is None
-                    and entry.device_id
-                    and (device := device_registry.async_get(entry.device_id))
-                ):
-                    area_id = device.area_id
-            if area_id and (area := area_registry.async_get_area(area_id)):
-                line += f" in {area.name}"
-            lines.append(line)
-        if not lines:
-            return ""
-        return "\n".join([EXPOSED_ENTITIES_INTRO, *lines])
-
-    def _device_context(self, user_input: conversation.ConversationInput) -> str:
-        """Describe the voice device that heard the request, and its area."""
-        if not user_input.device_id:
-            return ""
-        device = dr.async_get(self.hass).async_get(user_input.device_id)
-        if device is None:
-            return ""
-        name = device.name_by_user or device.name
-        area = (
-            ar.async_get(self.hass).async_get_area(device.area_id)
-            if device.area_id
-            else None
-        )
-        if area is None:
-            return f'The user is talking to the voice device "{name}".'
-        return (
-            f'The user is talking to the voice device "{name}" in the {area.name}. '
-            f"'Here' means the {area.name}."
+        return build_messages(
+            self.hass,
+            self._options,
+            user_input.text,
+            device_id=user_input.device_id,
+            language=user_input.language,
+            extra_system_prompt=user_input.extra_system_prompt,
         )
 
     def _link_follow_up(
@@ -369,7 +266,7 @@ class HermesAssistEntity(
 
     async def _async_produce(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         session_id: str | None,
         conversation_id: str,
         queue: asyncio.Queue[object],
@@ -380,6 +277,7 @@ class HermesAssistEntity(
             async with self.entry.runtime_data.client.stream_chat(
                 messages,
                 model=options.get(CONF_MODEL) or None,
+                reasoning_effort=options.get(CONF_REASONING_EFFORT) or None,
                 session_key=options.get(CONF_SESSION_KEY, DEFAULT_SESSION_KEY) or None,
                 session_id=session_id,
                 timeout=float(options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)),
@@ -471,7 +369,8 @@ class HermesAssistEntity(
                 text, error = await _async_collect(queue)
         except TimeoutError:
             producer.cancel()
-            message = self._message(CONF_MESSAGE_TOO_LONG)
+            _LOGGER.warning("Hermes took longer than the timeout")
+            message = self._message(CONF_MESSAGE_GENERIC)
         else:
             message = self._late_message(text, error)
         self._store.touch(conversation_id)
@@ -480,7 +379,7 @@ class HermesAssistEntity(
     def _late_message(self, text: str, error: HermesError | None) -> str:
         """Return what to deliver for a handed-off answer."""
         if isinstance(error, HermesTimeoutError):
-            return self._message(CONF_MESSAGE_TOO_LONG)
+            return self._error_message(error)
         if speakable := _speakable(text):
             if error is not None:
                 _LOGGER.warning(
@@ -489,19 +388,23 @@ class HermesAssistEntity(
             return speakable
         if error is not None:
             return self._error_message(error)
-        return self._message(CONF_MESSAGE_EMPTY)
+        _LOGGER.warning("Hermes returned no answer")
+        return self._message(CONF_MESSAGE_GENERIC)
 
     def _error_message(self, error: HermesError) -> str:
-        """Return the spoken message for an error; ask for a new key once."""
+        """Log the cause of an error and return the one spoken error message.
+
+        A rejected API key also asks for a new key, once.
+        """
         if isinstance(error, HermesAuthError):
+            _LOGGER.warning("Hermes rejected the API key")
             self.entry.runtime_data.request_reauth(self.hass, self.entry)
-            return self._message(CONF_MESSAGE_AUTH)
-        if isinstance(error, HermesTimeoutError):
-            return self._message(CONF_MESSAGE_TOO_LONG)
-        if isinstance(error, HermesConnectionError):
+        elif isinstance(error, HermesTimeoutError):
+            _LOGGER.warning("Hermes took longer than the timeout: %s", error)
+        elif isinstance(error, HermesConnectionError):
             _LOGGER.warning("Could not reach Hermes: %s", error)
-            return self._message(CONF_MESSAGE_CANNOT_CONNECT)
-        _LOGGER.warning("Hermes returned an error: %s", error)
+        else:
+            _LOGGER.warning("Hermes returned an error: %s", error)
         return self._message(CONF_MESSAGE_GENERIC)
 
     def _media_id(self, message: str, language: str | None) -> str | None:

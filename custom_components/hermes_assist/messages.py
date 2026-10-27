@@ -1,9 +1,12 @@
-"""Default text spoken to the user; each agent can replace it."""
+"""Default text spoken to the user, and the error texts of the ask action.
+
+An agent can replace HANDOFF_MESSAGE and ERROR_GENERIC; the other errors are
+only raised by the ask action.
+"""
 
 from typing import Final
 
 HANDOFF_MESSAGE: Final = "I'm working on that. I'll let you know when it's done."
-RESET_MESSAGE: Final = "Okay, starting a new conversation."
 ERROR_CANNOT_CONNECT: Final = "Sorry, I couldn't reach Hermes in time."
 ERROR_AUTH: Final = "Hermes rejected the API key."
 ERROR_GENERIC: Final = "Sorry, Hermes had a problem."

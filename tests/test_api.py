@@ -18,6 +18,7 @@ from custom_components.hermes_assist.api import (
     HermesAuthError,
     HermesClient,
     HermesConnectionError,
+    HermesError,
     HermesResponseError,
     HermesStreamError,
     is_valid_session_id,
@@ -178,6 +179,31 @@ async def test_session_id_is_available_before_the_first_delta(
         assert stream.content_received is False
         assert [text async for text in stream] == ["Hi"]
         assert stream.content_received is True
+
+
+async def test_stream_sends_reasoning_effort(
+    client: HermesClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    aioclient_mock.post(
+        CHAT_URL, text=chunk({"content": "Hi"}) + DONE, headers=SSE_HEADERS
+    )
+
+    await collect(client, reasoning_effort="high")
+
+    payload = aioclient_mock.mock_calls[0][2]
+    assert payload["model_options"] == {"reasoning_effort": "high"}
+
+
+async def test_stream_without_reasoning_effort_sends_no_model_options(
+    client: HermesClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    aioclient_mock.post(
+        CHAT_URL, text=chunk({"content": "Hi"}) + DONE, headers=SSE_HEADERS
+    )
+
+    await collect(client)
+
+    assert "model_options" not in aioclient_mock.mock_calls[0][2]
 
 
 async def test_stream_sends_model_and_session_id(
@@ -368,6 +394,40 @@ async def test_validate_success(
     await client.async_validate()
 
     assert aioclient_mock.mock_calls[0][3]["Authorization"] == f"Bearer {API_KEY}"
+
+
+async def test_list_models(
+    client: HermesClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    aioclient_mock.get(
+        MODELS_URL,
+        json={
+            "object": "list",
+            "data": [
+                {"id": "hermes-agent", "object": "model"},
+                {"id": "gpt-5", "object": "model"},
+                {"object": "model"},
+            ],
+        },
+    )
+
+    assert await client.async_list_models() == ["hermes-agent", "gpt-5"]
+
+
+@pytest.mark.parametrize(
+    "mock_kwargs",
+    [{"status": 401}, {"status": 500}, {"text": "not json"}, {"json": {"data": "x"}}],
+    ids=["401", "500", "not_json", "bad_shape"],
+)
+async def test_list_models_errors(
+    client: HermesClient,
+    aioclient_mock: AiohttpClientMocker,
+    mock_kwargs: dict[str, Any],
+) -> None:
+    aioclient_mock.get(MODELS_URL, **mock_kwargs)
+
+    with pytest.raises(HermesError):
+        await client.async_list_models()
 
 
 @pytest.mark.parametrize(

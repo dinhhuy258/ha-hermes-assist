@@ -135,32 +135,6 @@ async def test_per_conversation_mode_evicts_the_oldest(hass: HomeAssistant) -> N
     assert store.get("conversation-new") == "session-new"
 
 
-@pytest.mark.parametrize(
-    "mode", [SESSION_MODE_KEEP, SESSION_MODE_IDLE, SESSION_MODE_PER_CONVERSATION]
-)
-async def test_reset_drops_the_session(hass: HomeAssistant, mode: str) -> None:
-    store = await load_store(hass, mode)
-    store.set("conversation-1", "session-1")
-
-    store.reset("conversation-1")
-
-    assert store.get("conversation-1") is None
-
-
-async def test_reset_is_saved(
-    hass: HomeAssistant, hass_storage: dict[str, Any]
-) -> None:
-    store = await load_store(hass, SESSION_MODE_KEEP)
-    store.set(None, "session-1")
-    await flush(hass)
-    assert hass_storage[KEY]["data"]["session_id"] == "session-1"
-
-    store.reset(None)
-    await flush(hass)
-
-    assert hass_storage[KEY]["data"]["session_id"] is None
-
-
 @pytest.mark.parametrize("session_id", ["bad\nid", "x" * 129, 42])
 async def test_invalid_stored_ids_are_ignored(
     hass: HomeAssistant, hass_storage: dict[str, Any], session_id: Any

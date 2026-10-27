@@ -19,6 +19,8 @@ from homeassistant.helpers.typing import ConfigType
 from .api import HermesAuthError, HermesClient, HermesError
 from .const import (
     CONF_API_KEY,
+    CONF_LIST_EXPOSED_ENTITIES,
+    CONF_MESSAGES,
     CONF_SESSION_IDLE_TIMEOUT,
     CONF_SESSION_MODE,
     CONF_URL,
@@ -28,12 +30,13 @@ from .const import (
     DOMAIN,
     SUBENTRY_TYPE_CONVERSATION,
 )
+from .context import exposed_entities_cache
 from .services import async_setup_services
 from .session import SessionStore, async_move_sessions, async_remove_sessions
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.CONVERSATION]
+PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.CONVERSATION]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
@@ -63,7 +66,8 @@ def conversation_subentries(entry: ConfigEntry) -> list[ConfigSubentry]:
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the hermes_assist.ask service."""
+    """Register the hermes_assist.ask service and the exposed-entity cache."""
+    exposed_entities_cache(hass)
     async_setup_services(hass)
     return True
 
@@ -125,12 +129,27 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         await async_remove_sessions(hass, subentry.subentry_id)
 
 
-async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Move the options of a version 1 entry into a conversation subentry.
+# Spoken messages that version 2.1 stored and 2.2 no longer has.
+_REMOVED_MESSAGES = {
+    "reset_message",
+    "cannot_connect_message",
+    "auth_message",
+    "empty_message",
+    "too_long_message",
+}
 
-    The entity, its device and its session file follow the subentry so that
-    the agent keeps its entity id and its Hermes session. Home Assistant
-    refuses a version newer than the config flow before calling this.
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Bring an older entry up to the current version.
+
+    1 -> 2: the options move into a conversation subentry. The entity, its
+    device and its session file follow the subentry so that the agent keeps
+    its entity id and its Hermes session.
+    2.1 -> 2.2: the exposed_entities option is renamed list_exposed_entities
+    and the removed reset phrases and per-error messages are dropped.
+
+    Home Assistant refuses a version newer than the config flow before
+    calling this.
     """
     if entry.version == 1:
         subentry = ConfigSubentry(
@@ -168,4 +187,22 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry, options={}, version=2, minor_version=1
         )
         _LOGGER.info("Migrated the Hermes Assist options into agent %s", entry.title)
+
+    if entry.version == 2 and entry.minor_version < 2:
+        for subentry in conversation_subentries(entry):
+            data = dict(subentry.data)
+            data[CONF_LIST_EXPOSED_ENTITIES] = bool(
+                data.pop(
+                    "exposed_entities", DEFAULT_OPTIONS[CONF_LIST_EXPOSED_ENTITIES]
+                )
+            )
+            data.pop("reset_phrases", None)
+            if isinstance(messages := data.get(CONF_MESSAGES), dict):
+                data[CONF_MESSAGES] = {
+                    key: value
+                    for key, value in messages.items()
+                    if key not in _REMOVED_MESSAGES
+                }
+            hass.config_entries.async_update_subentry(entry, subentry, data=data)
+        hass.config_entries.async_update_entry(entry, minor_version=2)
     return True

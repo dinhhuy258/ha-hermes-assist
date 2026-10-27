@@ -217,24 +217,53 @@ class HermesClient:
         except (aiohttp.ClientError, TimeoutError) as err:
             raise HermesConnectionError(f"Could not reach Hermes: {err}") from err
 
+    async def async_list_models(self) -> list[str]:
+        """Return the model ids of GET /v1/models."""
+        try:
+            async with self._session.get(
+                f"{self.url}/v1/models",
+                headers=self._headers(),
+                timeout=aiohttp.ClientTimeout(total=VALIDATE_TIMEOUT),
+            ) as response:
+                if response.status in (401, 403):
+                    raise HermesAuthError("Hermes rejected the API key")
+                response.raise_for_status()
+                body = await response.json(content_type=None)
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise HermesConnectionError(f"Could not reach Hermes: {err}") from err
+        except ValueError as err:
+            raise HermesResponseError("Hermes sent an invalid model list") from err
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, list):
+            raise HermesResponseError("Hermes sent an invalid model list")
+        return [
+            item["id"]
+            for item in data
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        ]
+
     @asynccontextmanager
     async def stream_chat(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         *,
         model: str | None = None,
         session_key: str | None = None,
         session_id: str | None = None,
+        reasoning_effort: str | None = None,
         timeout: float,
     ) -> AsyncIterator[HermesStream]:
         """Open a streaming chat completion and yield its answer stream.
 
         A stored session id that Hermes rejects with 400 or 404 is dropped and
-        the request is retried once without it.
+        the request is retried once without it. reasoning_effort is sent as
+        model_options.reasoning_effort when set.
         """
         payload: dict[str, Any] = {"messages": messages, "stream": True}
         if model:
             payload["model"] = model
+        if reasoning_effort:
+            payload["model_options"] = {"reasoning_effort": reasoning_effort}
         client_timeout = aiohttp.ClientTimeout(total=timeout, connect=CONNECT_TIMEOUT)
 
         response = await self._async_post(
