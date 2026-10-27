@@ -124,6 +124,7 @@ class HermesStream:
                         break
                     parts.extend(self._handle_chunk(data))
         except TimeoutError as err:
+            # Drop partial text: a timeout usually hits mid tool loop, so it is narration.
             raise HermesTimeoutError(
                 "Hermes did not finish the answer in time"
             ) from err
@@ -204,33 +205,15 @@ class HermesClient:
         return headers
 
     async def async_validate(self) -> None:
-        """Check the URL and the key with GET /v1/models."""
-        try:
-            async with self._session.get(
-                f"{self.url}/v1/models",
-                headers=self._headers(),
-                timeout=aiohttp.ClientTimeout(total=VALIDATE_TIMEOUT),
-            ) as response:
-                if response.status in (401, 403):
-                    raise HermesAuthError("Hermes rejected the API key")
-                response.raise_for_status()
-        except (aiohttp.ClientError, TimeoutError) as err:
-            raise HermesConnectionError(f"Could not reach Hermes: {err}") from err
+        """Check the URL and the key with GET /v1/models; the body is not read."""
+        async with self._async_get_models():
+            pass
 
     async def async_list_models(self) -> list[str]:
         """Return the model ids of GET /v1/models."""
         try:
-            async with self._session.get(
-                f"{self.url}/v1/models",
-                headers=self._headers(),
-                timeout=aiohttp.ClientTimeout(total=VALIDATE_TIMEOUT),
-            ) as response:
-                if response.status in (401, 403):
-                    raise HermesAuthError("Hermes rejected the API key")
-                response.raise_for_status()
+            async with self._async_get_models() as response:
                 body = await response.json(content_type=None)
-        except (aiohttp.ClientError, TimeoutError) as err:
-            raise HermesConnectionError(f"Could not reach Hermes: {err}") from err
         except ValueError as err:
             raise HermesResponseError("Hermes sent an invalid model list") from err
         data = body.get("data") if isinstance(body, dict) else None
@@ -241,6 +224,22 @@ class HermesClient:
             for item in data
             if isinstance(item, dict) and isinstance(item.get("id"), str)
         ]
+
+    @asynccontextmanager
+    async def _async_get_models(self) -> AsyncIterator[aiohttp.ClientResponse]:
+        """Send GET /v1/models and yield the successful response."""
+        try:
+            async with self._session.get(
+                f"{self.url}/v1/models",
+                headers=self._headers(),
+                timeout=aiohttp.ClientTimeout(total=VALIDATE_TIMEOUT),
+            ) as response:
+                if response.status in (401, 403):
+                    raise HermesAuthError("Hermes rejected the API key")
+                response.raise_for_status()
+                yield response
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise HermesConnectionError(f"Could not reach Hermes: {err}") from err
 
     @asynccontextmanager
     async def stream_chat(

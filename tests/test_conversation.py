@@ -62,6 +62,7 @@ from custom_components.hermes_assist.const import (
 from custom_components.hermes_assist.messages import (
     ERROR_CANNOT_CONNECT,
     ERROR_GENERIC,
+    ERROR_TOO_LONG,
     HANDOFF_MESSAGE,
 )
 from custom_components.hermes_assist.prompts import (
@@ -1049,15 +1050,28 @@ async def test_ask_with_a_rejected_key_starts_reauth(
     start_reauth.assert_called_once()
 
 
-async def test_ask_connection_error(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (HermesConnectionError("Connection refused"), ERROR_CANNOT_CONNECT),
+        (HermesTimeoutError("Hermes took too long"), ERROR_TOO_LONG),
+        (HermesResponseError("Hermes returned HTTP 500"), ERROR_GENERIC),
+    ],
+    ids=["connection", "timeout", "server"],
+)
+async def test_ask_errors(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    error: Exception,
+    message: str,
 ) -> None:
-    hermes.error = HermesConnectionError("Connection refused")
+    hermes.error = error
 
     with pytest.raises(HomeAssistantError) as err:
         await ask(hass, **{ATTR_TEXT: "Hello"})
 
-    assert str(err.value) == ERROR_CANNOT_CONNECT
+    assert str(err.value) == message
 
 
 async def test_ask_with_an_unknown_agent(

@@ -21,6 +21,7 @@ from custom_components.hermes_assist.api import (
     HermesError,
     HermesResponseError,
     HermesStreamError,
+    HermesTimeoutError,
     is_valid_session_id,
     normalize_url,
 )
@@ -54,10 +55,11 @@ def event(name: str, data: Any) -> str:
 
 
 class _BrokenBody:
-    """An SSE body that loses the connection after its lines."""
+    """An SSE body that fails with an error after its lines."""
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, error: Exception) -> None:
         self._lines = [line + b"\n" for line in text.encode().split(b"\n")]
+        self._error = error
 
     def __aiter__(self):
         return self._iterate()
@@ -65,15 +67,18 @@ class _BrokenBody:
     async def _iterate(self):
         for line in self._lines:
             yield line
-        raise aiohttp.ClientPayloadError("Response payload is not completed")
+        raise self._error
 
 
 class BrokenResponse(AiohttpClientMockResponse):
-    """A mocked SSE response whose body breaks after the given text."""
+    """A mocked SSE response whose body fails after the given text."""
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, error: Exception | None = None) -> None:
         super().__init__("post", URL(CHAT_URL), headers=SSE_HEADERS)
-        self._body = _BrokenBody(text)
+        self._body = _BrokenBody(
+            text,
+            error or aiohttp.ClientPayloadError("Response payload is not completed"),
+        )
 
     @property
     def content(self):
@@ -343,6 +348,23 @@ async def test_broken_stream_after_content(
                 texts.append(text)
 
     assert texts == ["Hello"]
+
+
+async def test_timeout_after_content_drops_the_text(
+    client: HermesClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    async def respond(method: str, url: URL, data: Any) -> BrokenResponse:
+        return BrokenResponse(chunk({"content": "Let me check"}), TimeoutError())
+
+    aioclient_mock.post(CHAT_URL, side_effect=respond)
+    texts: list[str] = []
+
+    with pytest.raises(HermesTimeoutError):
+        async with client.stream_chat(MESSAGES, timeout=30) as stream:
+            async for text in stream:
+                texts.append(text)
+
+    assert texts == []
 
 
 @pytest.mark.parametrize("status", [400, 404])
