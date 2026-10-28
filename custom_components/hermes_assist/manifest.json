@@ -1,14 +1,19 @@
 {
   "domain": "hermes_assist",
   "name": "Hermes Assist",
-  "after_dependencies": ["camera"],
   "codeowners": ["@dinhhuy258"],
   "config_flow": true,
-  "dependencies": ["conversation", "assist_pipeline", "assist_satellite", "tts"],
+  "dependencies": [
+    "ai_task",
+    "conversation",
+    "assist_pipeline",
+    "assist_satellite",
+    "tts"
+  ],
   "documentation": "https://github.com/dinhhuy258/ha-hermes-assist",
   "integration_type": "service",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/dinhhuy258/ha-hermes-assist/issues",
   "requirements": [],
-  "version": "0.4.0"
+  "version": "0.5.0"
 }

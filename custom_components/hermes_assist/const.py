@@ -92,10 +92,3 @@ VALIDATE_TIMEOUT: Final = 10
 CONNECT_TIMEOUT: Final = 10
 
 SUBENTRY_TYPE_CONVERSATION: Final = "conversation"
-
-SERVICE_ASK: Final = "ask"
-ATTR_TEXT: Final = "text"
-ATTR_SESSION_ID: Final = "session_id"
-ATTR_AGENT_ID: Final = "agent_id"
-ATTR_SYSTEM_PROMPT: Final = "system_prompt"
-ATTR_CAMERA_ENTITY_ID: Final = "camera_entity_id"

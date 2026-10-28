@@ -26,11 +26,6 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClien
 import voluptuous as vol
 
 from custom_components.hermes_assist.const import (
-    ATTR_AGENT_ID,
-    ATTR_CAMERA_ENTITY_ID,
-    ATTR_SESSION_ID,
-    ATTR_SYSTEM_PROMPT,
-    ATTR_TEXT,
     CONF_API_KEY,
     CONF_HANDOFF_AFTER,
     CONF_LIST_EXPOSED_ENTITIES,
@@ -707,10 +702,3 @@ def test_translations_cover_every_form_field() -> None:
     assert set(strings["selector"]["reasoning_effort"]["options"]) == set(
         REASONING_EFFORTS
     )
-    assert set(strings["services"]["ask"]["fields"]) == {
-        ATTR_TEXT,
-        ATTR_SESSION_ID,
-        ATTR_AGENT_ID,
-        ATTR_SYSTEM_PROMPT,
-        ATTR_CAMERA_ENTITY_ID,
-    }

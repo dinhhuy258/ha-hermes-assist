@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 from collections.abc import Mapping
 import logging
 from typing import Any
@@ -190,21 +189,16 @@ def build_system_prompt(
     hass: HomeAssistant,
     options: Mapping[str, Any],
     *,
-    prompt: str | None = None,
     device_id: str | None = None,
     language: str | None = None,
     extra_system_prompt: str | None = None,
 ) -> str:
-    """Combine the prompt with the context of one request.
+    """Combine the rendered agent prompt with the context of one request.
 
-    The agent prompt is rendered as a template; a prompt given by the caller
-    replaces it and is sent as written. The exposed entities come right after
-    the prompt so that the part of the system message that is the same for
-    every request stays a prefix.
+    The exposed entities come right after the prompt so that the part of the
+    system message that is the same for every request stays a prefix.
     """
-    if prompt is None:
-        prompt = render_prompt(hass, options.get(CONF_PROMPT, DEFAULT_PROMPT))
-    parts = [prompt]
+    parts = [render_prompt(hass, options.get(CONF_PROMPT, DEFAULT_PROMPT))]
     if options.get(CONF_LIST_EXPOSED_ENTITIES, DEFAULT_LIST_EXPOSED_ENTITIES):
         parts.append(exposed_entities_cache(hass).text())
     parts.append(device_context(hass, device_id))
@@ -225,34 +219,16 @@ def build_messages(
     device_id: str | None = None,
     language: str | None = None,
     extra_system_prompt: str | None = None,
-    image: tuple[str, bytes] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return the system and user messages of one request.
-
-    image is (content type, bytes); it is sent as a data URL next to the text.
-    """
+    """Return the system and user messages of one request."""
     messages: list[dict[str, Any]] = []
     if system := build_system_prompt(
         hass,
         options,
-        prompt=prompt,
         device_id=device_id,
         language=language,
         extra_system_prompt=extra_system_prompt,
     ):
         messages.append({"role": "system", "content": system})
-    if image is None:
-        messages.append({"role": "user", "content": text})
-        return messages
-    content_type, data = image
-    url = f"data:{content_type};base64,{base64.b64encode(data).decode()}"
-    messages.append(
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": text},
-                {"type": "image_url", "image_url": {"url": url}},
-            ],
-        }
-    )
+    messages.append({"role": "user", "content": text})
     return messages

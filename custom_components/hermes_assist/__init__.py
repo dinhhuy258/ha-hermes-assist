@@ -23,12 +23,11 @@ from .const import (
     SUBENTRY_TYPE_CONVERSATION,
 )
 from .context import exposed_entities_cache
-from .services import async_setup_services
 from .session import SessionStore, async_remove_sessions
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.CONVERSATION]
+PLATFORMS: list[Platform] = [Platform.AI_TASK, Platform.BUTTON, Platform.CONVERSATION]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
@@ -58,9 +57,8 @@ def conversation_subentries(entry: ConfigEntry) -> list[ConfigSubentry]:
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the hermes_assist.ask service and the exposed-entity cache."""
+    """Create the exposed-entity cache shared by every entry."""
     exposed_entities_cache(hass)
-    async_setup_services(hass)
     return True
 
 

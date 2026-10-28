@@ -1,20 +1,18 @@
-"""Tests for the Hermes Assist conversation agent and the ask service."""
+"""Tests for the Hermes Assist conversation agent."""
 
 import asyncio
-from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 from homeassistant.components import conversation
 from homeassistant.components.assist_satellite import AssistSatelliteEntityFeature
-from homeassistant.components.camera import Image
 from homeassistant.components.homeassistant.exposed_entities import (
     async_expose_entity,
 )
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigSubentry
 from homeassistant.core import Context, HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
@@ -26,8 +24,6 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_mock_service,
 )
-import voluptuous as vol
-import yaml
 
 from custom_components.hermes_assist.api import (
     HermesAuthError,
@@ -38,11 +34,6 @@ from custom_components.hermes_assist.api import (
     ToolStarted,
 )
 from custom_components.hermes_assist.const import (
-    ATTR_AGENT_ID,
-    ATTR_CAMERA_ENTITY_ID,
-    ATTR_SESSION_ID,
-    ATTR_SYSTEM_PROMPT,
-    ATTR_TEXT,
     CONF_HANDOFF_AFTER,
     CONF_LIST_EXPOSED_ENTITIES,
     CONF_MESSAGE_GENERIC,
@@ -56,14 +47,11 @@ from custom_components.hermes_assist.const import (
     DEFAULT_OPTIONS,
     DOMAIN,
     NAME,
-    SERVICE_ASK,
     SESSION_MODE_PER_CONVERSATION,
     SUBENTRY_TYPE_CONVERSATION,
 )
 from custom_components.hermes_assist.messages import (
-    ERROR_CANNOT_CONNECT,
     ERROR_GENERIC,
-    ERROR_TOO_LONG,
     HANDOFF_MESSAGE,
 )
 from custom_components.hermes_assist.prompts import (
@@ -71,7 +59,7 @@ from custom_components.hermes_assist.prompts import (
     EXPOSED_ENTITIES_INTRO,
 )
 
-from .conftest import ENTITY_ID, SUBENTRY_ID, FakeHermes, set_options
+from .conftest import ENTITY_ID, FakeHermes, set_options
 
 SATELLITE = "assist_satellite.kitchen"
 ANNOUNCE = AssistSatelliteEntityFeature.ANNOUNCE
@@ -237,16 +225,13 @@ async def test_reasoning_effort_option_is_sent(
     hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
 ) -> None:
     await set_options(hass, setup_entry, {CONF_REASONING_EFFORT: "low"})
-    for _ in range(2):
-        stream = hermes.stream()
-        stream.push("Okay.")
-        stream.finish()
+    stream = hermes.stream()
+    stream.push("Okay.")
+    stream.finish()
 
     await converse(hass, "Hello")
-    await ask(hass, **{ATTR_TEXT: "Hello"})
 
     assert hermes.calls[0]["reasoning_effort"] == "low"
-    assert hermes.calls[1]["reasoning_effort"] == "low"
 
 
 async def test_reasoning_effort_is_off_by_default(
@@ -1056,284 +1041,3 @@ async def test_each_agent_has_its_own_prompt_and_session(
     )
     assert device is not None
     assert device.name == "Hermes Vietnamese"
-
-
-SERVICES_YAML = (
-    Path(__file__).parent.parent
-    / "custom_components"
-    / "hermes_assist"
-    / "services.yaml"
-)
-
-
-async def ask(hass: HomeAssistant, **data: Any) -> dict[str, Any]:
-    """Call hermes_assist.ask and return its response."""
-    response = await hass.services.async_call(
-        DOMAIN, SERVICE_ASK, data, blocking=True, return_response=True
-    )
-    assert response is not None
-    return dict(response)
-
-
-async def test_ask_returns_the_text_and_stores_the_session(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    stream = hermes.stream("session-9")
-    stream.push("  Three meetings today.")
-    stream.finish()
-
-    response = await ask(hass, **{ATTR_TEXT: "What is on my calendar?"})
-
-    assert response == {"text": "Three meetings today.", "session_id": "session-9"}
-    assert hermes.calls[0]["messages"] == [
-        {"role": "system", "content": DEFAULT_PROMPT},
-        {"role": "user", "content": "What is on my calendar?"},
-    ]
-
-    voice = hermes.stream("session-9")
-    voice.push("Two tomorrow.")
-    voice.finish()
-    await converse(hass, "And tomorrow?")
-    assert hermes.calls[1]["session_id"] == "session-9"
-
-
-async def test_ask_with_a_session_id_leaves_the_stored_session_alone(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    for session_id in ("session-1", "session-x", "session-1"):
-        stream = hermes.stream(session_id)
-        stream.push("Okay.")
-        stream.finish()
-
-    await converse(hass, "Hello")
-    response = await ask(
-        hass, **{ATTR_TEXT: "Status report", ATTR_SESSION_ID: "manual-session"}
-    )
-    await converse(hass, "Hello again")
-
-    assert response["session_id"] == "session-x"
-    assert [call["session_id"] for call in hermes.calls] == [
-        None,
-        "manual-session",
-        "session-1",
-    ]
-
-
-async def test_ask_sends_the_rendered_agent_prompt_and_exposed_entities(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    await set_options(
-        hass,
-        setup_entry,
-        {CONF_PROMPT: "Count: {{ 2 + 3 }}.", CONF_LIST_EXPOSED_ENTITIES: True},
-    )
-    await expose_fixtures(hass, setup_entry)
-    stream = hermes.stream()
-    stream.push("Okay.")
-    stream.finish()
-
-    await ask(hass, **{ATTR_TEXT: "Hello"})
-
-    system = hermes.calls[0]["messages"][0]["content"]
-    assert system.startswith("Count: 5.\n\n")
-    assert "- light.f1_living_room_light: Light" in system
-    assert "voice device" not in system
-    assert "Reply in the language" not in system
-
-
-async def test_ask_system_prompt_replaces_the_agent_prompt(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    await set_options(hass, setup_entry, {CONF_LIST_EXPOSED_ENTITIES: True})
-    await expose_fixtures(hass, setup_entry)
-    stream = hermes.stream()
-    stream.push("Okay.")
-    stream.finish()
-
-    await ask(
-        hass,
-        **{
-            ATTR_TEXT: "Hello",
-            ATTR_SYSTEM_PROMPT: "Answer in JSON. {{ not rendered }}",
-        },
-    )
-
-    system = hermes.calls[0]["messages"][0]["content"]
-    assert system.startswith("Answer in JSON. {{ not rendered }}\n\n")
-    assert DEFAULT_PROMPT not in system
-    assert "- light.f1_living_room_light: Light" in system
-
-
-async def test_ask_with_an_empty_agent_prompt_sends_no_system_message(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    await set_options(hass, setup_entry, {CONF_PROMPT: ""})
-    stream = hermes.stream()
-    stream.push("Okay.")
-    stream.finish()
-
-    await ask(hass, **{ATTR_TEXT: "Hello"})
-
-    assert hermes.calls[0]["messages"] == [{"role": "user", "content": "Hello"}]
-
-
-GET_IMAGE = "custom_components.hermes_assist.services.camera.async_get_image"
-
-
-async def test_ask_sends_a_camera_snapshot(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    hass.states.async_set("camera.front_door", "idle")
-    stream = hermes.stream()
-    stream.push("A parcel.")
-    stream.finish()
-
-    with patch(GET_IMAGE, return_value=Image("image/jpeg", b"\xff\xd8jpeg")) as get:
-        response = await ask(
-            hass,
-            **{
-                ATTR_TEXT: "What is at the door?",
-                ATTR_CAMERA_ENTITY_ID: "camera.front_door",
-            },
-        )
-
-    get.assert_awaited_once_with(hass, "camera.front_door")
-    assert response["text"] == "A parcel."
-    user = hermes.calls[0]["messages"][-1]
-    assert user["role"] == "user"
-    assert user["content"] == [
-        {"type": "text", "text": "What is at the door?"},
-        {
-            "type": "image_url",
-            "image_url": {"url": "data:image/jpeg;base64,/9hqcGVn"},
-        },
-    ]
-
-
-async def test_ask_with_a_camera_that_fails(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    hass.states.async_set("camera.front_door", "idle")
-
-    with (
-        patch(GET_IMAGE, side_effect=HomeAssistantError("Unable to get image")),
-        pytest.raises(HomeAssistantError, match=r"camera\.front_door"),
-    ):
-        await ask(
-            hass, **{ATTR_TEXT: "Look", ATTR_CAMERA_ENTITY_ID: "camera.front_door"}
-        )
-
-    assert hermes.calls == []
-
-
-async def test_ask_rejects_a_non_camera_entity(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    with pytest.raises((vol.Invalid, ServiceValidationError)):
-        await ask(hass, **{ATTR_TEXT: "Look", ATTR_CAMERA_ENTITY_ID: "light.kitchen"})
-
-
-async def test_ask_with_a_rejected_key_starts_reauth(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    hermes.error = HermesAuthError("Hermes rejected the API key")
-
-    with (
-        patch.object(ConfigEntry, "async_start_reauth") as start_reauth,
-        pytest.raises(HomeAssistantError, match="rejected the API key"),
-    ):
-        await ask(hass, **{ATTR_TEXT: "Hello"})
-
-    start_reauth.assert_called_once()
-
-
-@pytest.mark.parametrize(
-    ("error", "message"),
-    [
-        (HermesConnectionError("Connection refused"), ERROR_CANNOT_CONNECT),
-        (HermesTimeoutError("Hermes took too long"), ERROR_TOO_LONG),
-        (HermesResponseError("Hermes returned HTTP 500"), ERROR_GENERIC),
-    ],
-    ids=["connection", "timeout", "server"],
-)
-async def test_ask_errors(
-    hass: HomeAssistant,
-    setup_entry: MockConfigEntry,
-    hermes: FakeHermes,
-    error: Exception,
-    message: str,
-) -> None:
-    hermes.error = error
-
-    with pytest.raises(HomeAssistantError) as err:
-        await ask(hass, **{ATTR_TEXT: "Hello"})
-
-    assert str(err.value) == message
-
-
-async def test_ask_with_an_unknown_agent(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    with pytest.raises(ServiceValidationError, match=r"conversation\.missing"):
-        await ask(hass, **{ATTR_TEXT: "Hello", ATTR_AGENT_ID: "conversation.missing"})
-
-
-async def test_ask_needs_an_agent_when_several_exist(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    hass.config_entries.async_add_subentry(
-        setup_entry,
-        ConfigSubentry(
-            data=MappingProxyType(dict(DEFAULT_OPTIONS)),
-            subentry_id="agent-2",
-            subentry_type=SUBENTRY_TYPE_CONVERSATION,
-            title="Hermes Vietnamese",
-            unique_id=None,
-        ),
-    )
-    await hass.async_block_till_done()
-    stream = hermes.stream("session-vi")
-    stream.push("Được.")
-    stream.finish()
-
-    with pytest.raises(ServiceValidationError, match="agent_id"):
-        await ask(hass, **{ATTR_TEXT: "Hello"})
-
-    response = await ask(
-        hass, **{ATTR_TEXT: "Xin chào", ATTR_AGENT_ID: "conversation.hermes_vietnamese"}
-    )
-
-    assert response["session_id"] == "session-vi"
-    assert setup_entry.runtime_data.stores["agent-2"].get(None) == "session-vi"
-    assert setup_entry.runtime_data.stores[SUBENTRY_ID].get(None) is None
-
-
-async def test_ask_with_an_unloaded_agent(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    assert await hass.config_entries.async_unload(setup_entry.entry_id)
-
-    with pytest.raises(ServiceValidationError, match="not loaded"):
-        await ask(hass, **{ATTR_TEXT: "Hello", ATTR_AGENT_ID: ENTITY_ID})
-    with pytest.raises(ServiceValidationError, match="No Hermes"):
-        await ask(hass, **{ATTR_TEXT: "Hello"})
-
-
-async def test_ask_rejects_an_unsafe_session_id(
-    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
-) -> None:
-    with pytest.raises((vol.Invalid, ServiceValidationError)):
-        await ask(hass, **{ATTR_TEXT: "Hello", ATTR_SESSION_ID: "bad\nid"})
-
-
-def test_services_yaml_lists_the_ask_fields() -> None:
-    services = yaml.safe_load(SERVICES_YAML.read_text())
-
-    assert set(services[SERVICE_ASK]["fields"]) == {
-        ATTR_TEXT,
-        ATTR_SESSION_ID,
-        ATTR_AGENT_ID,
-        ATTR_SYSTEM_PROMPT,
-        ATTR_CAMERA_ENTITY_ID,
-    }
-    assert services[SERVICE_ASK]["fields"][ATTR_TEXT]["required"] is True

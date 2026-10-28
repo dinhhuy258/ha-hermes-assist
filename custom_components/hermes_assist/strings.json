@@ -176,33 +176,5 @@
         "per_conversation": "One session per conversation"
       }
     }
-  },
-  "services": {
-    "ask": {
-      "name": "Ask",
-      "description": "Sends text to Hermes with the prompt of the agent and returns the whole answer. Does not stream and does not hand off.",
-      "fields": {
-        "text": {
-          "name": "Text",
-          "description": "The request for Hermes."
-        },
-        "session_id": {
-          "name": "Session ID",
-          "description": "Hermes session to use for this call only. The stored session is left unchanged."
-        },
-        "agent_id": {
-          "name": "Agent",
-          "description": "The Hermes conversation agent to ask. Required only when more than one agent exists."
-        },
-        "camera_entity_id": {
-          "name": "Camera",
-          "description": "Sends a snapshot of this camera with the text, so Hermes can describe what it sees."
-        },
-        "system_prompt": {
-          "name": "System prompt",
-          "description": "Replaces the prompt of the agent for this call. It is sent as written, not rendered as a template. The exposed entities of the agent are still added."
-        }
-      }
-    }
   }
 }

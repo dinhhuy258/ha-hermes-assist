@@ -13,7 +13,7 @@ Hermes Assist speaks only the final answer of Hermes, not the text Hermes writes
 - Optional list of the entities exposed to Assist (ID, name, aliases, area) in the system prompt, so the agent can act without looking entities up first.
 - Spoken messages, such as the hand-off and error sentences, set per agent so each agent can speak its own language.
 - Markdown removed from spoken answers.
-- The `hermes_assist.ask` action for automations and scripts, with the agent prompt, an optional replacement prompt and an optional camera snapshot.
+- An AI Task entity per agent for `ai_task.generate_data`: plain answers, JSON structures and camera or image attachments.
 - A **Reset session** button on each agent device.
 
 ## Requirements
@@ -103,35 +103,44 @@ After `start_conversation`, the satellite listens with its own pipeline, so the 
 
 If you speak again while a request is still streaming, the earlier request is dropped and nothing is announced later.
 
-## Action: `hermes_assist.ask`
+## AI tasks
 
-The action sends text to Hermes and returns the whole answer without streaming or hand-off.
-It sends the prompt of the agent and, when the option is on, the exposed entities, like a voice request; no device or language sentence is added.
+Each agent also has an AI Task entity, `ai_task.hermes_assist` for the default agent, for the `ai_task.generate_data` action of Home Assistant.
+It can be the default AI task entity under **Settings > Voice assistants > AI tasks**.
+
+A task uses the model, reasoning effort, session key and timeout of the agent and starts a new Hermes session every time; nothing is stored.
+It sends the AI Task prompt of Home Assistant, not the prompt of the agent, with the exposed entities when the agent lists them.
+Home Assistant tools given with `llm_api` are not passed to Hermes; Hermes uses its own tools.
 
 ```yaml
-action: hermes_assist.ask
+action: ai_task.generate_data
 data:
-  text: "Summarize today's calendar in two sentences."
-response_variable: hermes
+  task_name: calendar_summary
+  entity_id: ai_task.hermes_assist
+  instructions: "Summarize today's calendar in two sentences."
+response_variable: result
 ```
 
-The response is `{"text": "...", "session_id": "..."}`.
-
-| Field | Description |
-|---|---|
-| `text` | The request. Required. |
-| `system_prompt` | Replaces the prompt of the agent for this call. Sent as written, not rendered as a template; render it in the automation first if needed. |
-| `camera_entity_id` | A camera whose current snapshot is sent with the text, so Hermes can describe what it sees. |
-| `session_id` | A Hermes session to use for this call only. The stored session is left unchanged. |
-| `agent_id` | The conversation entity, for example `conversation.hermes_assist`. Required when more than one agent exists. |
+The answer is `result.data`.
+With `structure`, Hermes is asked for a JSON object that matches it, and the parsed object is returned; a task fails when the answer is not JSON.
+Attachments are sent as images next to the instructions; a task with an attachment that is not an image fails.
 
 ```yaml
-action: hermes_assist.ask
+action: ai_task.generate_data
 data:
-  text: "Is there a parcel at the door? Answer yes or no."
-  system_prompt: "You describe camera images in one short sentence."
-  camera_entity_id: camera.front_door
-response_variable: hermes
+  task_name: parcel_check
+  entity_id: ai_task.hermes_assist
+  instructions: "Is there a parcel at the front door?"
+  structure:
+    parcel:
+      description: "Whether a parcel is visible"
+      required: true
+      selector:
+        boolean:
+  attachments:
+    media_content_id: media-source://camera/camera.front_door
+    media_content_type: image/jpeg
+response_variable: result
 ```
 
 ## Privacy and security
@@ -139,9 +148,9 @@ response_variable: hermes
 - The API key is stored in the config entry and is never logged.
 - Hermes receives the system prompt, the device and area name and the user text; no entity states are sent.
 - With **List exposed entities in the prompt** on, Hermes also receives the ID, name, aliases and area of every entity exposed to Assist.
-- With `camera_entity_id`, Hermes receives the camera snapshot.
+- With an attachment on an AI task, Hermes receives the image.
 - A template in the prompt can read any state or attribute; what it renders is sent to Hermes.
-- Anyone who can call Home Assistant actions can call `hermes_assist.ask`.
+- Anyone who can call Home Assistant actions can run `ai_task.generate_data` with the agent.
 - TLS certificate verification is always on.
 
 ## Troubleshooting
