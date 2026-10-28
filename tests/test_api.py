@@ -22,6 +22,7 @@ from custom_components.hermes_assist.api import (
     HermesResponseError,
     HermesStreamError,
     HermesTimeoutError,
+    ToolStarted,
     is_valid_session_id,
     normalize_url,
 )
@@ -155,6 +156,29 @@ async def test_stream_drops_text_before_a_tool_call(
     texts, _ = await collect(client)
 
     assert texts == ["The music is playing."]
+
+
+async def test_stream_items_report_tool_starts(
+    client: HermesClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    body = (
+        chunk({"content": "Let me check."})
+        + event("hermes.tool.progress", {"tool": "calendar", "status": "running"})
+        + event("hermes.tool.progress", {"tool": "calendar", "status": "completed"})
+        + event("hermes.tool.progress", {"status": "running"})
+        + chunk({"content": "You are free."})
+        + DONE
+    )
+    aioclient_mock.post(CHAT_URL, text=body, headers=SSE_HEADERS)
+
+    async with client.stream_chat(MESSAGES, timeout=30) as stream:
+        items = [item async for item in stream.items()]
+
+    assert items == [
+        ToolStarted("calendar", "Let me check."),
+        ToolStarted("tool"),
+        "You are free.",
+    ]
 
 
 async def test_stream_with_only_tool_narration_yields_nothing(

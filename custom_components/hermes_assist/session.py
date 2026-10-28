@@ -143,15 +143,6 @@ async def async_remove_sessions(hass: HomeAssistant, subentry_id: str) -> None:
     await _store(hass, subentry_id).async_remove()
 
 
-async def async_move_sessions(hass: HomeAssistant, old_id: str, new_id: str) -> None:
-    """Move a storage file to a new key; used when a v1 entry becomes a subentry."""
-    old = _store(hass, old_id)
-    data = await old.async_load()
-    if isinstance(data, dict):
-        await _store(hass, new_id).async_save(data)
-    await old.async_remove()
-
-
 async def async_clear_sessions(
     hass: HomeAssistant, entry: ConfigEntry, subentry_id: str
 ) -> None:

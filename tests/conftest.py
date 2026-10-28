@@ -12,7 +12,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.hermes_assist.api import HermesClient
+from custom_components.hermes_assist.api import HermesClient, ToolStarted
 from custom_components.hermes_assist.const import (
     CONF_API_KEY,
     CONF_URL,
@@ -42,12 +42,14 @@ class FakeStream:
         self.session_id = session_id
         self.content_received = False
         self.closed = False
-        self._items: asyncio.Queue[str | Exception | None] = asyncio.Queue()
+        self._items: asyncio.Queue[str | ToolStarted | Exception | None] = (
+            asyncio.Queue()
+        )
 
-    def push(self, *texts: str) -> None:
-        """Add content deltas."""
-        for text in texts:
-            self._items.put_nowait(text)
+    def push(self, *items: str | ToolStarted) -> None:
+        """Add content deltas and tool starts."""
+        for item in items:
+            self._items.put_nowait(item)
 
     def finish(self) -> None:
         """End the stream normally."""
@@ -59,10 +61,17 @@ class FakeStream:
 
     async def __aiter__(self) -> AsyncIterator[str]:
         """Yield the pushed deltas until the stream ends."""
+        async for item in self.items():
+            if isinstance(item, str):
+                yield item
+
+    async def items(self) -> AsyncIterator[str | ToolStarted]:
+        """Yield the pushed deltas and tool starts until the stream ends."""
         while (item := await self._items.get()) is not None:
             if isinstance(item, Exception):
                 raise item
-            self.content_received = True
+            if isinstance(item, str):
+                self.content_received = True
             yield item
 
 
@@ -137,6 +146,7 @@ def mock_entry(hass: HomeAssistant) -> MockConfigEntry:
         domain=DOMAIN,
         title=NAME,
         version=2,
+        minor_version=2,
         data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
         subentries_data=[subentry_data()],
     )

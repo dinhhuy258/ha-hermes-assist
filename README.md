@@ -5,9 +5,10 @@ Hermes Assist speaks only the final answer of Hermes, not the text Hermes writes
 
 ## Features
 
-- Answers through the streaming Hermes `/v1/chat/completions` endpoint, without the text Hermes writes before a tool call.
+- Answers through the streaming Hermes `/v1/chat/completions` endpoint; the text Hermes writes before a tool call is kept out of the answer.
 - Hermes-owned session continuity through `X-Hermes-Session-Id`, with three session modes.
 - Hand-off for long requests: the satellite says a short acknowledgement and the answer is delivered later.
+- Progress sentence: the satellite says the short sentence Hermes writes before its first tool, in the language Hermes uses.
 - The prompt is a Home Assistant template, rendered on every request; device, area and language context is added after it.
 - Optional list of the entities exposed to Assist (ID, name, aliases, area) in the system prompt, so the agent can act without looking entities up first.
 - Spoken messages, such as the hand-off and error sentences, set per agent so each agent can speak its own language.
@@ -78,6 +79,17 @@ The text after the last tool call is the answer.
 
 When the answer is not ready within **Hand off after**, the satellite says "I'm working on that. I'll let you know when it's done." and the request keeps running in the background.
 Each agent can replace this sentence under **Spoken messages**.
+
+When Hermes starts its first tool, the satellite says the sentence Hermes wrote just before it, such as "Let me check your calendar.", and the hand-off time counts from that sentence instead of from the request.
+With a hand-off time of 15 seconds and a first tool at 5 seconds, the satellite says the sentence at 5 seconds and the hand-off sentence at 20 seconds, only if Hermes is still working then.
+The default prompt asks Hermes for this sentence.
+Agents created before this change keep their saved prompt, which tells Hermes not to describe what it is about to do before a tool; replace that line with one that asks for one short sentence before the first tool.
+
+- Only the text before the first tool is said, with markdown removed. Text longer than 120 characters is cut to its first sentence, and nothing is said when that is still longer.
+- Tool names, tool arguments and the progress labels of Hermes are never said.
+- When Hermes writes nothing before its first tool, nothing is said and the hand-off time still counts from the request.
+- Requests without a tool are answered as before.
+- The sentence is said early only when the text to speech engine of the pipeline supports streaming; otherwise the satellite says it together with the answer.
 
 When the answer is ready, Hermes Assist waits up to 60 seconds for the satellite to be idle and then delivers it:
 

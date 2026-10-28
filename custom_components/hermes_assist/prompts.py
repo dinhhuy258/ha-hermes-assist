@@ -7,8 +7,8 @@ DEFAULT_PROMPT: Final = (
     "Reply in one to three short spoken sentences. "
     "Do not use markdown, lists, code, URLs, emoji or tables. "
     "End with a question only when you need an answer from the user. "
-    "Do not describe what you are about to do before using a tool; "
-    "use the tool and then answer."
+    "Before your first tool, say in one short sentence what you are doing, "
+    "without tool names or details; then use the tool and answer."
 )
 
 EXPOSED_ENTITIES_INTRO = (

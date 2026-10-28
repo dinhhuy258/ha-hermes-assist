@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterable, AsyncIterator
 from contextlib import aclosing, asynccontextmanager
+from dataclasses import dataclass
 import json
 import logging
 from typing import Any
@@ -83,13 +84,24 @@ async def _iter_sse(content: AsyncIterable[bytes]) -> AsyncIterator[tuple[str, s
         yield event, "\n".join(data)
 
 
-def _is_tool_start(data: str) -> bool:
-    """Return whether a tool progress event reports a tool that starts running."""
+@dataclass(frozen=True, slots=True)
+class ToolStarted:
+    """Hermes started running a tool; text is what it wrote just before."""
+
+    name: str
+    text: str = ""
+
+
+def _started_tool(data: str) -> str | None:
+    """Return the name of the tool that a tool progress event reports as started."""
     try:
         progress = json.loads(data)
     except ValueError:
-        return False
-    return isinstance(progress, dict) and progress.get("status") == "running"
+        return None
+    if not isinstance(progress, dict) or progress.get("status") != "running":
+        return None
+    name = progress.get("tool")
+    return name if isinstance(name, str) and name else "tool"
 
 
 class HermesStream:
@@ -103,19 +115,29 @@ class HermesStream:
         self.content_received = False
 
     async def __aiter__(self) -> AsyncIterator[str]:
-        """Yield the answer once the stream ends.
+        """Yield the answer once the stream ends, without the tool starts."""
+        async with aclosing(self.items()) as items:
+            async for item in items:
+                if isinstance(item, str):
+                    yield item
+
+    async def items(self) -> AsyncIterator[str | ToolStarted]:
+        """Yield each tool start as it happens and the answer once the stream ends.
 
         The answer is the text after the last tool call. Text before a tool
-        call describes the work in progress, so it is dropped. Any text can
-        still be followed by a tool call, so nothing is yielded before the end.
+        call describes the work in progress, so it comes with the tool start
+        instead of the answer. Any text can still be followed by a tool call,
+        so no answer text is yielded before the end.
         """
         parts: list[str] = []
         try:
             async with aclosing(_iter_sse(self._response.content)) as events:
                 async for event, data in events:
                     if event == EVENT_TOOL_PROGRESS:
-                        if _is_tool_start(data):
+                        if (name := _started_tool(data)) is not None:
+                            text = "".join(parts).strip()
                             parts.clear()
+                            yield ToolStarted(name, text)
                         continue
                     if event != "message":
                         # hermes.status, approval.request.

@@ -1,7 +1,7 @@
 """Conversation agent that streams Hermes Agent answers into Assist."""
 
 import asyncio
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Callable, Mapping
 import logging
 import re
 from typing import Any, Literal
@@ -23,14 +23,18 @@ from homeassistant.const import (
 )
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import (
-    intent,
-)
+from homeassistant.helpers import intent, llm
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 
 from . import HermesAssistConfigEntry, conversation_subentries
-from .api import HermesAuthError, HermesConnectionError, HermesError, HermesTimeoutError
+from .api import (
+    HermesAuthError,
+    HermesConnectionError,
+    HermesError,
+    HermesTimeoutError,
+    ToolStarted,
+)
 from .const import (
     CONF_HANDOFF_AFTER,
     CONF_MESSAGE_GENERIC,
@@ -64,6 +68,9 @@ _LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 _LINE_MARKUP = re.compile(r"^[ \t]*(?:#{1,6}[ \t]*|>[ \t]*|[-*+][ \t]+)", re.MULTILINE)
 _INLINE_MARKUP = re.compile(r"[*`]")
 _WORD_UNDERSCORE = re.compile(r"(?<=[^\W_])_+(?=[^\W_])")
+_SENTENCE_END = re.compile(r"(?<=[.!?\u2026])\s")
+# Longer text before a tool is narration, not a progress sentence.
+_MAX_PROGRESS_LENGTH = 120
 
 
 async def async_setup_entry(
@@ -107,6 +114,19 @@ def _speakable(text: str) -> str:
     return " ".join(_SymbolStripper()(text).split())
 
 
+def _progress_sentence(text: str) -> str:
+    """Return the short sentence to say from the text Hermes wrote before a tool.
+
+    The whole text when it is short, else its first sentence when that is
+    short, else nothing.
+    """
+    text = _speakable(text)
+    if len(text) <= _MAX_PROGRESS_LENGTH:
+        return text
+    first = _SENTENCE_END.split(text, maxsplit=1)[0]
+    return first if len(first) <= _MAX_PROGRESS_LENGTH else ""
+
+
 def _same_language(first: str | None, second: str | None) -> bool:
     """Return whether two language codes share their base language."""
     if not first or not second:
@@ -122,9 +142,15 @@ async def _async_collect(
 ) -> tuple[str, HermesError | None]:
     """Read the rest of an answer; return its text and the error that ended it."""
     parts: list[str] = []
-    while isinstance(item := await queue.get(), str):
-        parts.append(item)
+    while isinstance(item := await queue.get(), str | ToolStarted):
+        if isinstance(item, str):
+            parts.append(item)
     return "".join(parts), (item if isinstance(item, HermesError) else None)
+
+
+def _tool_input(tool: ToolStarted) -> llm.ToolInput:
+    """Record a tool that Hermes runs; Home Assistant does not run it."""
+    return llm.ToolInput(tool_name=tool.name, tool_args={}, external=True)
 
 
 class HermesAssistEntity(
@@ -203,23 +229,45 @@ class HermesAssistEntity(
             f"{DOMAIN} answer {conversation_id}",
         )
         handoff_after = float(options.get(CONF_HANDOFF_AFTER, DEFAULT_HANDOFF_AFTER))
+        handed_off = False
+
+        def hand_off() -> None:
+            nonlocal handed_off
+            handed_off = True
+            self._hand_off(producer, queue, deadline, user_input, conversation_id)
 
         try:
             try:
                 async with asyncio.timeout(handoff_after or None):
-                    first = await queue.get()
+                    # A tool with nothing to say before it keeps the wait going.
+                    while isinstance(first := await queue.get(), ToolStarted) and not (
+                        progress := _progress_sentence(first.text)
+                    ):
+                        pass
             except TimeoutError:
-                self._hand_off(producer, queue, deadline, user_input, conversation_id)
+                hand_off()
                 return self._reply(
                     user_input, chat_log, self._message(CONF_MESSAGE_HANDOFF)
                 )
             if isinstance(first, HermesError):
                 return self._error(user_input, chat_log, self._error_message(first))
-            if isinstance(first, str):
+            if isinstance(first, ToolStarted):
+                await self._async_stream_progress(
+                    user_input,
+                    chat_log,
+                    first,
+                    progress,
+                    queue,
+                    handoff_after,
+                    hand_off,
+                )
+            elif isinstance(first, str):
                 await self._async_stream(user_input, chat_log, first, queue)
         except asyncio.CancelledError:
-            # The pipeline gave up on this turn: close the stream, announce nothing.
-            producer.cancel()
+            # The pipeline gave up on this turn: close the stream, announce
+            # nothing. A handed-off request keeps running.
+            if not handed_off:
+                producer.cancel()
             raise
 
         self._store.touch(conversation_id)
@@ -283,8 +331,8 @@ class HermesAssistEntity(
                 timeout=float(options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)),
             ) as stream:
                 self._remember_session(conversation_id, stream.session_id)
-                async for text in stream:
-                    queue.put_nowait(text)
+                async for item in stream.items():
+                    queue.put_nowait(item)
         except HermesError as err:
             queue.put_nowait(err)
         except Exception as err:
@@ -325,6 +373,72 @@ class HermesAssistEntity(
                 _LOGGER.warning(
                     "The Hermes stream broke after the answer started: %s", item
                 )
+
+        async for _content in chat_log.async_add_delta_content_stream(
+            user_input.agent_id, deltas()
+        ):
+            pass
+
+    async def _async_stream_progress(
+        self,
+        user_input: conversation.ConversationInput,
+        chat_log: conversation.ChatLog,
+        first: ToolStarted,
+        progress: str,
+        queue: asyncio.Queue[object],
+        handoff_after: float,
+        hand_off: Callable[[], None],
+    ) -> None:
+        """Say what Hermes wrote before its tool, then the answer.
+
+        Text followed by a tool call makes the pipeline start text to speech
+        at once instead of waiting for the answer. The hand-off time counts
+        from the progress sentence, so the hand-off message is said only when
+        Hermes is still working handoff_after seconds later. Text before later
+        tools is not said.
+        """
+        strip = _SymbolStripper()
+        handoff_at = self.hass.loop.time() + handoff_after if handoff_after else None
+
+        async def deltas() -> AsyncGenerator[conversation.AssistantContentDeltaDict]:
+            yield {"role": "assistant"}
+            # The space keeps the next sentence apart when the pipeline joins them.
+            yield {"content": f"{progress} "}
+            yield {"tool_calls": [_tool_input(first)]}
+            answered = False
+            while True:
+                try:
+                    async with asyncio.timeout_at(None if answered else handoff_at):
+                        item = await queue.get()
+                except TimeoutError:
+                    _LOGGER.debug("Hermes is still working after the progress sentence")
+                    hand_off()
+                    yield {"role": "assistant"}
+                    yield {"content": self._message(CONF_MESSAGE_HANDOFF)}
+                    return
+                if isinstance(item, ToolStarted):
+                    yield {"tool_calls": [_tool_input(item)]}
+                elif isinstance(item, str):
+                    if not answered:
+                        answered = True
+                        yield {"role": "assistant"}
+                    yield {"content": strip(item)}
+                else:
+                    break
+            if answered:
+                if isinstance(item, HermesError):
+                    _LOGGER.warning(
+                        "The Hermes stream broke after the answer started: %s", item
+                    )
+                return
+            # Speech has started, so a failure is said instead of returned as an error.
+            if isinstance(item, HermesError):
+                message = self._error_message(item)
+            else:
+                _LOGGER.warning("Hermes returned no answer")
+                message = self._message(CONF_MESSAGE_GENERIC)
+            yield {"role": "assistant"}
+            yield {"content": message}
 
         async for _content in chat_log.async_add_delta_content_stream(
             user_input.agent_id, deltas()
