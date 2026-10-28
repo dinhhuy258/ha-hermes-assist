@@ -80,7 +80,7 @@ The text after the last tool call is the answer.
 When the answer is not ready within **Hand off after**, the satellite says "I'm working on that. I'll let you know when it's done." and the request keeps running in the background.
 Each agent can replace this sentence under **Spoken messages**.
 
-When Hermes starts its first tool, the satellite says the sentence Hermes wrote just before it, such as "Let me check your calendar." or "Để mình xem lịch của bạn.", and the hand-off time counts from that sentence instead of from the request.
+When Hermes starts its first tool, the satellite says the sentence Hermes wrote just before it, such as "Let me check your calendar.", and the hand-off time counts from that sentence instead of from the request.
 With a hand-off time of 15 seconds and a first tool at 5 seconds, the satellite says the sentence at 5 seconds and the hand-off sentence at 20 seconds, only if Hermes is still working then.
 The default prompt asks Hermes for this sentence.
 Agents created before this change keep their saved prompt, which tells Hermes not to describe what it is about to do before a tool; replace that line with one that asks for one short sentence before the first tool.
