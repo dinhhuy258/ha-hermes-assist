@@ -5,6 +5,7 @@ from typing import Any, Final
 from .messages import (
     ERROR_GENERIC,
     HANDOFF_MESSAGE,
+    PROGRESS_MESSAGE,
 )
 from .prompts import DEFAULT_PROMPT
 
@@ -22,8 +23,10 @@ CONF_HANDOFF_AFTER: Final = "handoff_after"
 CONF_TIMEOUT: Final = "timeout"
 CONF_LIST_EXPOSED_ENTITIES: Final = "list_exposed_entities"
 CONF_REASONING_EFFORT: Final = "reasoning_effort"
+CONF_SPEAK_PROGRESS: Final = "speak_progress"
 CONF_MESSAGES: Final = "messages"
 CONF_MESSAGE_HANDOFF: Final = "handoff_message"
+CONF_MESSAGE_PROGRESS: Final = "progress_message"
 CONF_MESSAGE_GENERIC: Final = "error_message"
 
 SESSION_MODE_KEEP: Final = "keep"
@@ -56,9 +59,11 @@ DEFAULT_TIMEOUT: Final = 600
 DEFAULT_LIST_EXPOSED_ENTITIES: Final = False
 # Empty means the Hermes default.
 DEFAULT_REASONING_EFFORT: Final = ""
+DEFAULT_SPEAK_PROGRESS: Final = False
 # An empty or missing message falls back to its default.
 DEFAULT_MESSAGES: Final[dict[str, str]] = {
     CONF_MESSAGE_HANDOFF: HANDOFF_MESSAGE,
+    CONF_MESSAGE_PROGRESS: PROGRESS_MESSAGE,
     CONF_MESSAGE_GENERIC: ERROR_GENERIC,
 }
 
@@ -77,6 +82,7 @@ DEFAULT_OPTIONS: Final[dict[str, Any]] = {
     CONF_SESSION_MODE: DEFAULT_SESSION_MODE,
     CONF_SESSION_IDLE_TIMEOUT: DEFAULT_SESSION_IDLE_TIMEOUT,
     CONF_HANDOFF_AFTER: DEFAULT_HANDOFF_AFTER,
+    CONF_SPEAK_PROGRESS: DEFAULT_SPEAK_PROGRESS,
     CONF_TIMEOUT: DEFAULT_TIMEOUT,
     CONF_LIST_EXPOSED_ENTITIES: DEFAULT_LIST_EXPOSED_ENTITIES,
     CONF_REASONING_EFFORT: DEFAULT_REASONING_EFFORT,

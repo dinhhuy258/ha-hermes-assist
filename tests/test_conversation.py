@@ -35,6 +35,7 @@ from custom_components.hermes_assist.api import (
     HermesResponseError,
     HermesStreamError,
     HermesTimeoutError,
+    ToolStarted,
 )
 from custom_components.hermes_assist.const import (
     ATTR_AGENT_ID,
@@ -46,11 +47,13 @@ from custom_components.hermes_assist.const import (
     CONF_LIST_EXPOSED_ENTITIES,
     CONF_MESSAGE_GENERIC,
     CONF_MESSAGE_HANDOFF,
+    CONF_MESSAGE_PROGRESS,
     CONF_MESSAGES,
     CONF_MODEL,
     CONF_PROMPT,
     CONF_REASONING_EFFORT,
     CONF_SESSION_MODE,
+    CONF_SPEAK_PROGRESS,
     CONF_TIMEOUT,
     DEFAULT_OPTIONS,
     DOMAIN,
@@ -64,6 +67,7 @@ from custom_components.hermes_assist.messages import (
     ERROR_GENERIC,
     ERROR_TOO_LONG,
     HANDOFF_MESSAGE,
+    PROGRESS_MESSAGE,
 )
 from custom_components.hermes_assist.prompts import (
     DEFAULT_PROMPT,
@@ -613,6 +617,166 @@ async def test_busy_satellite_falls_back_to_a_notification(
 
     notify.assert_called_once_with(hass, "All done.", title=NAME)
     assert calls["announce"] == []
+
+
+@pytest.fixture
+def assistant_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[str | None, list[str]]]:
+    """Record each streamed assistant message: its text and its tool names."""
+    added: list[tuple[str | None, list[str]]] = []
+    add = conversation.ChatLog.async_add_assistant_content
+
+    def _add(self: conversation.ChatLog, content: Any, /, **kwargs: Any) -> Any:
+        if isinstance(content, conversation.AssistantContent):
+            tools = [tool.tool_name for tool in content.tool_calls or []]
+            added.append((content.content, tools))
+        return add(self, content, **kwargs)
+
+    monkeypatch.setattr(conversation.ChatLog, "async_add_assistant_content", _add)
+    return added
+
+
+async def test_tool_starts_are_silent_without_progress(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    assistant_log: list[tuple[str | None, list[str]]],
+) -> None:
+    stream = hermes.stream()
+    stream.push(ToolStarted("calendar"), "You have a dentist appointment.")
+    stream.finish()
+
+    result = await converse(hass, "What's on tomorrow?")
+
+    assert speech(result) == "You have a dentist appointment."
+    assert assistant_log == [("You have a dentist appointment.", [])]
+
+
+async def test_progress_message_is_said_at_the_first_tool(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    assistant_log: list[tuple[str | None, list[str]]],
+) -> None:
+    await set_options(hass, setup_entry, {CONF_SPEAK_PROGRESS: True})
+    stream = hermes.stream()
+    stream.push(
+        ToolStarted("calendar"),
+        ToolStarted("weather"),
+        "**Tomorrow** you have a dentist appointment.",
+    )
+    stream.finish()
+
+    result = await converse(hass, "What's on tomorrow?")
+
+    assert speech(result) == "Tomorrow you have a dentist appointment."
+    assert assistant_log == [
+        (f"{PROGRESS_MESSAGE} ", ["calendar", "weather"]),
+        ("Tomorrow you have a dentist appointment.", []),
+    ]
+
+
+async def test_answer_without_tools_has_no_progress_message(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    assistant_log: list[tuple[str | None, list[str]]],
+) -> None:
+    await set_options(hass, setup_entry, {CONF_SPEAK_PROGRESS: True})
+    stream = hermes.stream()
+    stream.push("Hello.")
+    stream.finish()
+
+    result = await converse(hass, "Hi")
+
+    assert speech(result) == "Hello."
+    assert assistant_log == [("Hello.", [])]
+
+
+async def test_handoff_time_counts_from_the_progress_message(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    assistant_log: list[tuple[str | None, list[str]]],
+) -> None:
+    """Hand off after 0.4 s; the progress message at 0.2 s moves it to 0.6 s."""
+    await set_options(
+        hass, setup_entry, {CONF_SPEAK_PROGRESS: True, CONF_HANDOFF_AFTER: 0.4}
+    )
+    stream = hermes.stream()
+
+    def answer() -> None:
+        stream.push("Done.")
+        stream.finish()
+
+    hass.loop.call_later(0.2, stream.push, ToolStarted("backup"))
+    hass.loop.call_later(0.5, answer)
+    result = await converse(hass, "Run a backup")
+
+    assert speech(result) == "Done."
+    assert [text for text, _ in assistant_log] == [f"{PROGRESS_MESSAGE} ", "Done."]
+
+
+async def test_handoff_after_the_progress_message(
+    hass: HomeAssistant,
+    handoff_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    assistant_log: list[tuple[str | None, list[str]]],
+) -> None:
+    calls = satellite(hass, ANNOUNCE)
+    await set_options(
+        hass,
+        handoff_entry,
+        {
+            CONF_SPEAK_PROGRESS: True,
+            CONF_MESSAGES: {CONF_MESSAGE_PROGRESS: "Đợi chút."},
+        },
+    )
+    stream = hermes.stream()
+    stream.push(ToolStarted("backup"))
+
+    result = await converse(hass, "Run a backup", satellite_id=SATELLITE)
+    assert speech(result) == HANDOFF_MESSAGE
+    assert [text for text, _ in assistant_log] == ["Đợi chút. ", HANDOFF_MESSAGE]
+
+    stream.push(ToolStarted("verify"), "Backup done.")
+    stream.finish()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert [call.data for call in calls["announce"]] == [
+        {"entity_id": SATELLITE, "message": "Backup done."}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("end", "log"),
+    [
+        (None, "Hermes returned no answer"),
+        (HermesConnectionError("Connection refused"), "Could not reach Hermes"),
+    ],
+    ids=["no answer", "error"],
+)
+async def test_failure_after_the_progress_message_is_said(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    caplog: pytest.LogCaptureFixture,
+    end: Exception | None,
+    log: str,
+) -> None:
+    await set_options(hass, setup_entry, {CONF_SPEAK_PROGRESS: True})
+    stream = hermes.stream()
+    stream.push(ToolStarted("search"))
+    if end is None:
+        stream.finish()
+    else:
+        stream.fail(end)
+
+    result = await converse(hass, "Search the web")
+
+    assert speech(result) == ERROR_GENERIC
+    assert log in caplog.text
 
 
 async def test_spoken_messages_are_configurable(

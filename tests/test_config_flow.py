@@ -43,6 +43,7 @@ from custom_components.hermes_assist.const import (
     CONF_SESSION_IDLE_TIMEOUT,
     CONF_SESSION_KEY,
     CONF_SESSION_MODE,
+    CONF_SPEAK_PROGRESS,
     CONF_TIMEOUT,
     CONF_URL,
     DEFAULT_MESSAGES,
@@ -538,6 +539,7 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
             CONF_SESSION_MODE: SESSION_MODE_KEEP,
             CONF_SESSION_IDLE_TIMEOUT: 900,
             CONF_HANDOFF_AFTER: 10,
+            CONF_SPEAK_PROGRESS: True,
             CONF_TIMEOUT: 300,
             CONF_LIST_EXPOSED_ENTITIES: True,
             CONF_REASONING_EFFORT: "high",
@@ -555,6 +557,7 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
         CONF_SESSION_MODE: SESSION_MODE_KEEP,
         CONF_SESSION_IDLE_TIMEOUT: 900,
         CONF_HANDOFF_AFTER: 10,
+        CONF_SPEAK_PROGRESS: True,
         CONF_TIMEOUT: 300,
         CONF_LIST_EXPOSED_ENTITIES: True,
         CONF_REASONING_EFFORT: "high",
@@ -594,6 +597,7 @@ async def test_add_agent_stores_cleared_text_fields_as_empty(
     assert result["data"][CONF_MESSAGES] == dict.fromkeys(DEFAULT_MESSAGES, "")
     assert result["data"][CONF_LIST_EXPOSED_ENTITIES] is False
     assert result["data"][CONF_REASONING_EFFORT] == ""
+    assert result["data"][CONF_SPEAK_PROGRESS] is False
 
 
 @pytest.mark.parametrize(

@@ -67,6 +67,7 @@
             "session_mode": "Session mode",
             "session_idle_timeout": "Session idle timeout",
             "handoff_after": "Hand off after",
+            "speak_progress": "Say a progress message",
             "timeout": "Timeout",
             "list_exposed_entities": "List exposed entities in the prompt",
             "reasoning_effort": "Reasoning effort"
@@ -79,6 +80,7 @@
             "session_mode": "How long a Hermes session continues across requests.",
             "session_idle_timeout": "In idle mode, start a new session after this many seconds without a request.",
             "handoff_after": "Seconds to wait for the answer before the satellite says it is working on it. 0 disables the hand-off.",
+            "speak_progress": "When Hermes starts its first tool, the satellite says the progress message right away. The hand-off time then counts from the progress message. Needs a text to speech engine that supports streaming.",
             "timeout": "Maximum time for one request, including a handed-off request.",
             "list_exposed_entities": "Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, so the agent can act on them without looking them up first. No states are sent.",
             "reasoning_effort": "How much the model thinks before it answers. Leave empty to use the Hermes default."
@@ -89,10 +91,12 @@
               "description": "Fixed sentences the satellite says. Write them in the language of the pipeline that uses this agent. Leave a field empty to use the English default.",
               "data": {
                 "handoff_message": "Hand-off",
+                "progress_message": "Progress",
                 "error_message": "Hermes error"
               },
               "data_description": {
                 "handoff_message": "Said when the answer is not ready within the hand-off time.",
+                "progress_message": "Said when Hermes starts its first tool, if Say a progress message is on.",
                 "error_message": "Said when a request fails: Hermes cannot be reached, rejects the API key, returns an error or no answer, or takes longer than the timeout. The cause is written to the log."
               }
             }
@@ -109,6 +113,7 @@
             "session_mode": "Session mode",
             "session_idle_timeout": "Session idle timeout",
             "handoff_after": "Hand off after",
+            "speak_progress": "Say a progress message",
             "timeout": "Timeout",
             "list_exposed_entities": "List exposed entities in the prompt",
             "reasoning_effort": "Reasoning effort"
@@ -121,6 +126,7 @@
             "session_mode": "How long a Hermes session continues across requests.",
             "session_idle_timeout": "In idle mode, start a new session after this many seconds without a request.",
             "handoff_after": "Seconds to wait for the answer before the satellite says it is working on it. 0 disables the hand-off.",
+            "speak_progress": "When Hermes starts its first tool, the satellite says the progress message right away. The hand-off time then counts from the progress message. Needs a text to speech engine that supports streaming.",
             "timeout": "Maximum time for one request, including a handed-off request.",
             "list_exposed_entities": "Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, so the agent can act on them without looking them up first. No states are sent.",
             "reasoning_effort": "How much the model thinks before it answers. Leave empty to use the Hermes default."
@@ -131,10 +137,12 @@
               "description": "Fixed sentences the satellite says. Write them in the language of the pipeline that uses this agent. Leave a field empty to use the English default.",
               "data": {
                 "handoff_message": "Hand-off",
+                "progress_message": "Progress",
                 "error_message": "Hermes error"
               },
               "data_description": {
                 "handoff_message": "Said when the answer is not ready within the hand-off time.",
+                "progress_message": "Said when Hermes starts its first tool, if Say a progress message is on.",
                 "error_message": "Said when a request fails: Hermes cannot be reached, rejects the API key, returns an error or no answer, or takes longer than the timeout. The cause is written to the log."
               }
             }
