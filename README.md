@@ -49,6 +49,7 @@ Reconfigure an agent from the three-dot menu of its row; deleting an agent remov
 |---|---|---|
 | Name | `Hermes Assist` | Name of the conversation entity and its device. |
 | Prompt | Smart-speaker prompt | System prompt sent with every request. Rendered as a Home Assistant template, so `{{ states('sensor.x') }}` and the other template functions work. A prompt with a syntax error is rejected when saving; one that fails at runtime is sent as written and logged. |
+| AI task prompt | Empty | System prompt of the AI Task entity of the agent, rendered as a template like the prompt. Empty keeps the default sentence of Home Assistant: "You are a Home Assistant expert and help users with their tasks." |
 | Model | Empty | Chosen from the models of the server, or typed. Sent as `model` only when set. |
 | Session key | `homeassistant:assist` | Sent as `X-Hermes-Session-Key` to select the Hermes memory scope. Agents that share a key share Hermes memory. |
 | Session mode | `idle` | `keep`, `idle` or `per_conversation`. |
@@ -116,7 +117,7 @@ Each agent also has an AI Task entity, `ai_task.hermes_assist` for the default a
 It can be the default AI task entity under **Settings > Voice assistants > AI tasks**.
 
 A task uses the model, reasoning effort, session key and timeout of the agent and starts a new Hermes session every time; nothing is stored.
-It sends the AI Task prompt of Home Assistant, not the prompt of the agent, with the exposed entities when the agent lists them.
+The system message starts with the **AI task prompt** of the agent, or with the default sentence of Home Assistant when that prompt is empty, followed by the current date and time, the exposed entities when the agent lists them, and the requested structure. The voice prompt of the agent is never sent with a task, so write the AI task prompt complete in itself, for example the language, the length and "no markdown" when the answer goes to a speaker.
 Home Assistant tools given with `llm_api` are not passed to Hermes; Hermes uses its own tools.
 
 ```yaml

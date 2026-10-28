@@ -14,6 +14,7 @@ NAME: Final = "Hermes Assist"
 CONF_URL: Final = "url"
 CONF_API_KEY: Final = "api_key"
 CONF_PROMPT: Final = "prompt"
+CONF_AI_TASK_PROMPT: Final = "ai_task_prompt"
 CONF_MODEL: Final = "model"
 CONF_SESSION_KEY: Final = "session_key"
 CONF_SESSION_MODE: Final = "session_mode"
@@ -58,6 +59,8 @@ DEFAULT_LIST_EXPOSED_ENTITIES: Final = False
 DEFAULT_SPEAK_EVERY_TOOL: Final = False
 # Empty means the Hermes default.
 DEFAULT_REASONING_EFFORT: Final = ""
+# Empty keeps the default AI Task sentence of Home Assistant.
+DEFAULT_AI_TASK_PROMPT: Final = ""
 # An empty or missing message falls back to its default.
 DEFAULT_MESSAGES: Final[dict[str, str]] = {
     CONF_MESSAGE_HANDOFF: HANDOFF_MESSAGE,
@@ -74,6 +77,7 @@ TIMEOUT_STEP: Final = 5
 
 DEFAULT_OPTIONS: Final[dict[str, Any]] = {
     CONF_PROMPT: DEFAULT_PROMPT,
+    CONF_AI_TASK_PROMPT: DEFAULT_AI_TASK_PROMPT,
     CONF_MODEL: DEFAULT_MODEL,
     CONF_SESSION_KEY: DEFAULT_SESSION_KEY,
     CONF_SESSION_MODE: DEFAULT_SESSION_MODE,

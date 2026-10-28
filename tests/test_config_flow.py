@@ -26,6 +26,7 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClien
 import voluptuous as vol
 
 from custom_components.hermes_assist.const import (
+    CONF_AI_TASK_PROMPT,
     CONF_API_KEY,
     CONF_HANDOFF_AFTER,
     CONF_LIST_EXPOSED_ENTITIES,
@@ -369,6 +370,7 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
         {
             CONF_NAME: "Hermes Vietnamese",
             CONF_PROMPT: "Trả lời tiếng Việt.",
+            CONF_AI_TASK_PROMPT: " Trả lời ngắn gọn bằng tiếng Việt. ",
             CONF_MODEL: "hermes-agent",
             CONF_SESSION_KEY: "homeassistant:vi",
             CONF_SESSION_MODE: SESSION_MODE_KEEP,
@@ -387,6 +389,7 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
     assert result["title"] == "Hermes Vietnamese"
     assert result["data"] == {
         CONF_PROMPT: "Trả lời tiếng Việt.",
+        CONF_AI_TASK_PROMPT: "Trả lời ngắn gọn bằng tiếng Việt.",
         CONF_MODEL: "hermes-agent",
         CONF_SESSION_KEY: "homeassistant:vi",
         CONF_SESSION_MODE: SESSION_MODE_KEEP,
@@ -427,6 +430,7 @@ async def test_add_agent_stores_cleared_text_fields_as_empty(
     await hass.async_block_till_done()
 
     assert result["data"][CONF_PROMPT] == ""
+    assert result["data"][CONF_AI_TASK_PROMPT] == ""
     assert result["data"][CONF_MODEL] == ""
     assert result["data"][CONF_SESSION_KEY] == ""
     assert result["data"][CONF_MESSAGES] == dict.fromkeys(DEFAULT_MESSAGES, "")
@@ -488,6 +492,20 @@ async def test_reconfigure_agent_rejects_a_broken_template(
         setup_entry.subentries[SUBENTRY_ID].data[CONF_PROMPT]
         == (DEFAULT_OPTIONS[CONF_PROMPT])
     )
+
+
+async def test_add_agent_rejects_a_broken_ai_task_template(
+    hass: HomeAssistant, setup_entry: MockConfigEntry
+) -> None:
+    result = await start_add_agent(hass, setup_entry)
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], agent_input(**{CONF_AI_TASK_PROMPT: "Hello {{ states("})
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_AI_TASK_PROMPT: "invalid_template"}
+    assert len(setup_entry.subentries) == 1
 
 
 async def test_agent_form_offers_the_models_of_the_server(

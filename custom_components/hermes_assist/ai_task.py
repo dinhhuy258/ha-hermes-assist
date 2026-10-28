@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from homeassistant.components import ai_task, conversation
+from homeassistant.components.ai_task.const import DEFAULT_SYSTEM_PROMPT
 from homeassistant.config_entries import ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -25,16 +26,18 @@ from .api import (
     HermesTimeoutError,
 )
 from .const import (
+    CONF_AI_TASK_PROMPT,
     CONF_LIST_EXPOSED_ENTITIES,
     CONF_MODEL,
     CONF_REASONING_EFFORT,
     CONF_SESSION_KEY,
     CONF_TIMEOUT,
+    DEFAULT_AI_TASK_PROMPT,
     DEFAULT_LIST_EXPOSED_ENTITIES,
     DEFAULT_SESSION_KEY,
     DEFAULT_TIMEOUT,
 )
-from .context import exposed_entities_cache
+from .context import exposed_entities_cache, render_prompt
 from .device import agent_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -77,8 +80,9 @@ class HermesTaskEntity(ai_task.AITaskEntity):
     """Answer generate_data tasks with the model, session key and timeout of an agent.
 
     Every task starts a new Hermes session; nothing is stored. The system
-    message is the AI Task prompt of Home Assistant, not the voice prompt of
-    the agent, followed by the exposed entities when the agent lists them.
+    message starts with the AI task prompt of the agent, or with the default
+    sentence of Home Assistant when that prompt is empty, never with the voice
+    prompt; the exposed entities follow when the agent lists them.
     """
 
     _attr_has_entity_name = True
@@ -147,18 +151,22 @@ class HermesTaskEntity(ai_task.AITaskEntity):
     def _system_prompt(
         self, task: ai_task.GenDataTask, chat_log: conversation.ChatLog
     ) -> str:
-        """Return the AI Task prompt of Home Assistant, the exposed entities and the schema.
+        """Return the system message: prompt, exposed entities and schema.
 
-        AITaskEntity put the prompt, with its date and time line and the prompt
-        of an llm_api when one is given, at the start of the chat log.
+        AITaskEntity put the default sentence of Home Assistant, a date and
+        time line and the prompt of an llm_api when one is given, at the start
+        of the chat log. The AI task prompt of the agent replaces the sentence
+        and keeps the rest.
         """
         first = chat_log.content[0]
-        parts: list[str] = [
-            first.content if isinstance(first, conversation.SystemContent) else ""
-        ]
-        if self.subentry.data.get(
-            CONF_LIST_EXPOSED_ENTITIES, DEFAULT_LIST_EXPOSED_ENTITIES
-        ):
+        head = first.content if isinstance(first, conversation.SystemContent) else ""
+        options = self.subentry.data
+        if prompt := options.get(CONF_AI_TASK_PROMPT, DEFAULT_AI_TASK_PROMPT):
+            head = render_prompt(self.hass, prompt) + head.removeprefix(
+                DEFAULT_SYSTEM_PROMPT
+            )
+        parts: list[str] = [head.strip()]
+        if options.get(CONF_LIST_EXPOSED_ENTITIES, DEFAULT_LIST_EXPOSED_ENTITIES):
             parts.append(exposed_entities_cache(self.hass).text())
         if task.structure is not None:
             schema = to_openapi(

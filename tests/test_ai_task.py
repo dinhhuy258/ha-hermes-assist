@@ -21,6 +21,7 @@ from custom_components.hermes_assist.api import (
     HermesTimeoutError,
 )
 from custom_components.hermes_assist.const import (
+    CONF_AI_TASK_PROMPT,
     CONF_LIST_EXPOSED_ENTITIES,
     CONF_MODEL,
     CONF_REASONING_EFFORT,
@@ -146,6 +147,53 @@ async def test_exposed_entities_follow_the_agent_option(
     system = hermes.calls[0]["messages"][0]["content"]
     assert ("- light.f1_living_room_light: Light" in system) is listed
     assert "light.hidden" not in system
+
+
+async def test_the_ai_task_prompt_replaces_the_default_sentence(
+    hass: HomeAssistant, setup_entry: MockConfigEntry, hermes: FakeHermes
+) -> None:
+    await set_options(
+        hass,
+        setup_entry,
+        {
+            CONF_AI_TASK_PROMPT: "Trả lời bằng tiếng Việt trong {{ 1 + 1 }} câu.",
+            CONF_LIST_EXPOSED_ENTITIES: True,
+        },
+    )
+    await expose_fixtures(hass, setup_entry)
+    answer(hermes, "Xong.")
+
+    await generate(hass, instructions="Hello")
+
+    system = hermes.calls[0]["messages"][0]["content"]
+    # The rendered prompt takes the place of the default sentence; the date
+    # and time line of Home Assistant and the entities follow it.
+    assert system.startswith("Trả lời bằng tiếng Việt trong 2 câu.\nCurrent time is ")
+    assert "You are a Home Assistant expert" not in system
+    assert DEFAULT_PROMPT not in system
+    assert system.index("Today's date is") < system.index(
+        "- light.f1_living_room_light: Light"
+    )
+
+
+async def test_an_ai_task_prompt_that_fails_to_render_is_sent_as_written(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await set_options(
+        hass,
+        setup_entry,
+        {CONF_AI_TASK_PROMPT: "{{ states.sensor.none.state.upper() }}"},
+    )
+    answer(hermes, "Okay.")
+
+    await generate(hass, instructions="Hello")
+
+    system = hermes.calls[0]["messages"][0]["content"]
+    assert system.startswith("{{ states.sensor.none.state.upper() }}\nCurrent time is ")
+    assert "Could not render the prompt" in caplog.text
 
 
 async def test_an_empty_answer_fails(

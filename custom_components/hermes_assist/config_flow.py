@@ -33,6 +33,7 @@ from yarl import URL
 
 from .api import HermesAuthError, HermesClient, HermesError, normalize_url
 from .const import (
+    CONF_AI_TASK_PROMPT,
     CONF_API_KEY,
     CONF_HANDOFF_AFTER,
     CONF_LIST_EXPOSED_ENTITIES,
@@ -103,6 +104,9 @@ def agent_schema(models: list[str]) -> vol.Schema:
         {
             vol.Required(CONF_NAME): TextSelector(),
             vol.Optional(CONF_PROMPT): TextSelector(TextSelectorConfig(multiline=True)),
+            vol.Optional(CONF_AI_TASK_PROMPT): TextSelector(
+                TextSelectorConfig(multiline=True)
+            ),
             vol.Optional(CONF_MODEL): SelectSelector(
                 SelectSelectorConfig(
                     options=models, mode=SelectSelectorMode.DROPDOWN, custom_value=True
@@ -170,6 +174,7 @@ def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
     """Return the agent options to store; cleared text fields are stored as empty."""
     return {
         CONF_PROMPT: user_input.get(CONF_PROMPT, "").strip(),
+        CONF_AI_TASK_PROMPT: user_input.get(CONF_AI_TASK_PROMPT, "").strip(),
         CONF_MODEL: user_input.get(CONF_MODEL, "").strip(),
         CONF_SESSION_KEY: user_input.get(CONF_SESSION_KEY, "").strip(),
         CONF_SESSION_MODE: user_input[CONF_SESSION_MODE],
@@ -312,9 +317,11 @@ class HermesAgentSubentryFlow(ConfigSubentryFlow):
 
     def _errors(self, options: dict[str, Any]) -> dict[str, str]:
         """Return the form errors of a submission."""
-        if not validate_prompt(self.hass, options[CONF_PROMPT]):
-            return {CONF_PROMPT: "invalid_template"}
-        return {}
+        return {
+            field: "invalid_template"
+            for field in (CONF_PROMPT, CONF_AI_TASK_PROMPT)
+            if not validate_prompt(self.hass, options[field])
+        }
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None

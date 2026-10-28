@@ -62,6 +62,7 @@
           "data": {
             "name": "Name",
             "prompt": "Prompt",
+            "ai_task_prompt": "AI task prompt",
             "model": "Model",
             "session_key": "Session key",
             "session_mode": "Session mode",
@@ -75,6 +76,7 @@
           "data_description": {
             "name": "Name of the conversation entity and its device.",
             "prompt": "System prompt sent with every voice request. It is rendered as a Home Assistant template, so template functions such as states() work. Device, area and language context is added after it.",
+            "ai_task_prompt": "System prompt sent with every AI task of this agent instead of the default sentence of Home Assistant. It is rendered as a Home Assistant template. The current date and time, the exposed entities and the requested structure are added after it. Leave empty to keep the Home Assistant default.",
             "model": "Model sent to Hermes. The list comes from the server; you can also type a name. Leave empty to use the Hermes default.",
             "session_key": "Sent as X-Hermes-Session-Key to select the Hermes memory scope. Leave empty to send no key.",
             "session_mode": "How long a Hermes session continues across requests.",
@@ -106,6 +108,7 @@
           "data": {
             "name": "Name",
             "prompt": "Prompt",
+            "ai_task_prompt": "AI task prompt",
             "model": "Model",
             "session_key": "Session key",
             "session_mode": "Session mode",
@@ -119,6 +122,7 @@
           "data_description": {
             "name": "Name of the conversation entity and its device.",
             "prompt": "System prompt sent with every voice request. It is rendered as a Home Assistant template, so template functions such as states() work. Device, area and language context is added after it.",
+            "ai_task_prompt": "System prompt sent with every AI task of this agent instead of the default sentence of Home Assistant. It is rendered as a Home Assistant template. The current date and time, the exposed entities and the requested structure are added after it. Leave empty to keep the Home Assistant default.",
             "model": "Model sent to Hermes. The list comes from the server; you can also type a name. Leave empty to use the Hermes default.",
             "session_key": "Sent as X-Hermes-Session-Key to select the Hermes memory scope. Leave empty to send no key.",
             "session_mode": "How long a Hermes session continues across requests.",
