@@ -43,6 +43,7 @@ from .const import (
     CONF_MODEL,
     CONF_REASONING_EFFORT,
     CONF_SESSION_KEY,
+    CONF_SPEAK_EVERY_TOOL,
     CONF_TIMEOUT,
     DEFAULT_HANDOFF_AFTER,
     DEFAULT_MESSAGES,
@@ -71,6 +72,17 @@ _WORD_UNDERSCORE = re.compile(r"(?<=[^\W_])_+(?=[^\W_])")
 _SENTENCE_END = re.compile(r"(?<=[.!?\u2026])\s")
 # Longer text before a tool is narration, not a progress sentence.
 _MAX_PROGRESS_LENGTH = 120
+# Text about tool work rather than for the user: snake_case or dotted names,
+# JSON, quoted arguments, or words that name the machinery.
+_TOOL_TALK = re.compile(
+    r"\w_\w"
+    r"|[^\W\d_]\.[^\W\d_]"
+    r"|[{}]"
+    r"|\"[^\"]*\"|“[^”]*”|`[^`]*`"
+    r"|\b(?:tools?|functions?|api|query|queries)\b"
+    r"|công cụ",
+    re.IGNORECASE,
+)
 
 
 async def async_setup_entry(
@@ -117,9 +129,11 @@ def _speakable(text: str) -> str:
 def _progress_sentence(text: str) -> str:
     """Return the short sentence to say from the text Hermes wrote before a tool.
 
-    The whole text when it is short, else its first sentence when that is
-    short, else nothing.
+    Nothing when the text talks about tool work; else the whole text when it
+    is short, else its first sentence when that is short, else nothing.
     """
+    if _TOOL_TALK.search(text):
+        return ""
     text = _speakable(text)
     if len(text) <= _MAX_PROGRESS_LENGTH:
         return text
@@ -229,6 +243,7 @@ class HermesAssistEntity(
             f"{DOMAIN} answer {conversation_id}",
         )
         handoff_after = float(options.get(CONF_HANDOFF_AFTER, DEFAULT_HANDOFF_AFTER))
+        speak_every_tool = bool(options.get(CONF_SPEAK_EVERY_TOOL, False))
         handed_off = False
 
         def hand_off() -> None:
@@ -260,6 +275,7 @@ class HermesAssistEntity(
                     queue,
                     handoff_after,
                     hand_off,
+                    speak_every_tool,
                 )
             elif isinstance(first, str):
                 await self._async_stream(user_input, chat_log, first, queue)
@@ -388,23 +404,28 @@ class HermesAssistEntity(
         queue: asyncio.Queue[object],
         handoff_after: float,
         hand_off: Callable[[], None],
+        speak_every_tool: bool,
     ) -> None:
         """Say what Hermes wrote before its tool, then the answer.
 
         Text followed by a tool call makes the pipeline start text to speech
         at once instead of waiting for the answer. The hand-off time counts
-        from the progress sentence, so the hand-off message is said only when
-        Hermes is still working handoff_after seconds later. Text before later
-        tools is not said.
+        from the last spoken sentence, so the hand-off message is said only
+        when Hermes is still working handoff_after seconds later. Text before
+        later tools is said only with speak_every_tool, and not when it
+        repeats the previous sentence. Nothing is said after the hand-off.
         """
         strip = _SymbolStripper()
-        handoff_at = self.hass.loop.time() + handoff_after if handoff_after else None
+        loop = self.hass.loop
+        handoff_at = loop.time() + handoff_after if handoff_after else None
 
         async def deltas() -> AsyncGenerator[conversation.AssistantContentDeltaDict]:
+            nonlocal handoff_at
             yield {"role": "assistant"}
             # The space keeps the next sentence apart when the pipeline joins them.
             yield {"content": f"{progress} "}
             yield {"tool_calls": [_tool_input(first)]}
+            spoken = progress
             answered = False
             while True:
                 try:
@@ -417,6 +438,12 @@ class HermesAssistEntity(
                     yield {"content": self._message(CONF_MESSAGE_HANDOFF)}
                     return
                 if isinstance(item, ToolStarted):
+                    sentence = _progress_sentence(item.text) if speak_every_tool else ""
+                    if sentence and sentence != spoken:
+                        spoken = sentence
+                        yield {"content": f"{sentence} "}
+                        if handoff_at is not None:
+                            handoff_at = loop.time() + handoff_after
                     yield {"tool_calls": [_tool_input(item)]}
                 elif isinstance(item, str):
                     if not answered:

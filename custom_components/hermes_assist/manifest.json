@@ -15,5 +15,5 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/dinhhuy258/ha-hermes-assist/issues",
   "requirements": [],
-  "version": "0.5.0"
+  "version": "0.6.0"
 }

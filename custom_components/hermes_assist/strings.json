@@ -69,6 +69,7 @@
             "handoff_after": "Hand off after",
             "timeout": "Timeout",
             "list_exposed_entities": "List exposed entities in the prompt",
+            "speak_every_tool": "Say the sentence before every tool",
             "reasoning_effort": "Reasoning effort"
           },
           "data_description": {
@@ -81,6 +82,7 @@
             "handoff_after": "Seconds to wait for the answer before the satellite says it is working on it. 0 disables the hand-off.",
             "timeout": "Maximum time for one request, including a handed-off request.",
             "list_exposed_entities": "Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, so the agent can act on them without looking them up first. No states are sent.",
+            "speak_every_tool": "Says the short sentence Hermes writes before each of its tools while the request is still live, not only the one before the first tool. A sentence equal to the previous one is skipped. Ask for it in the prompt, for example: Before each tool, say in one short sentence what you are doing or what you found; stay silent when nothing changed.",
             "reasoning_effort": "How much the model thinks before it answers. Leave empty to use the Hermes default."
           },
           "sections": {
@@ -111,6 +113,7 @@
             "handoff_after": "Hand off after",
             "timeout": "Timeout",
             "list_exposed_entities": "List exposed entities in the prompt",
+            "speak_every_tool": "Say the sentence before every tool",
             "reasoning_effort": "Reasoning effort"
           },
           "data_description": {
@@ -123,6 +126,7 @@
             "handoff_after": "Seconds to wait for the answer before the satellite says it is working on it. 0 disables the hand-off.",
             "timeout": "Maximum time for one request, including a handed-off request.",
             "list_exposed_entities": "Adds the entities exposed to Assist (ID, name, aliases, area) to the system prompt, so the agent can act on them without looking them up first. No states are sent.",
+            "speak_every_tool": "Says the short sentence Hermes writes before each of its tools while the request is still live, not only the one before the first tool. A sentence equal to the previous one is skipped. Ask for it in the prompt, for example: Before each tool, say in one short sentence what you are doing or what you found; stay silent when nothing changed.",
             "reasoning_effort": "How much the model thinks before it answers. Leave empty to use the Hermes default."
           },
           "sections": {

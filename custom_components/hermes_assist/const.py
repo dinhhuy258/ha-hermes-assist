@@ -21,6 +21,7 @@ CONF_SESSION_IDLE_TIMEOUT: Final = "session_idle_timeout"
 CONF_HANDOFF_AFTER: Final = "handoff_after"
 CONF_TIMEOUT: Final = "timeout"
 CONF_LIST_EXPOSED_ENTITIES: Final = "list_exposed_entities"
+CONF_SPEAK_EVERY_TOOL: Final = "speak_every_tool"
 CONF_REASONING_EFFORT: Final = "reasoning_effort"
 CONF_MESSAGES: Final = "messages"
 CONF_MESSAGE_HANDOFF: Final = "handoff_message"
@@ -54,6 +55,7 @@ DEFAULT_SESSION_IDLE_TIMEOUT: Final = 1800
 DEFAULT_HANDOFF_AFTER: Final = 15
 DEFAULT_TIMEOUT: Final = 600
 DEFAULT_LIST_EXPOSED_ENTITIES: Final = False
+DEFAULT_SPEAK_EVERY_TOOL: Final = False
 # Empty means the Hermes default.
 DEFAULT_REASONING_EFFORT: Final = ""
 # An empty or missing message falls back to its default.
@@ -79,6 +81,7 @@ DEFAULT_OPTIONS: Final[dict[str, Any]] = {
     CONF_HANDOFF_AFTER: DEFAULT_HANDOFF_AFTER,
     CONF_TIMEOUT: DEFAULT_TIMEOUT,
     CONF_LIST_EXPOSED_ENTITIES: DEFAULT_LIST_EXPOSED_ENTITIES,
+    CONF_SPEAK_EVERY_TOOL: DEFAULT_SPEAK_EVERY_TOOL,
     CONF_REASONING_EFFORT: DEFAULT_REASONING_EFFORT,
     CONF_MESSAGES: DEFAULT_MESSAGES,
 }

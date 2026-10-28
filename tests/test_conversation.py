@@ -43,6 +43,7 @@ from custom_components.hermes_assist.const import (
     CONF_PROMPT,
     CONF_REASONING_EFFORT,
     CONF_SESSION_MODE,
+    CONF_SPEAK_EVERY_TOOL,
     CONF_TIMEOUT,
     DEFAULT_OPTIONS,
     DOMAIN,
@@ -658,6 +659,90 @@ async def test_text_before_the_first_tool_is_said(
     ]
 
 
+async def test_text_before_every_tool_is_said_when_asked(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    assistant_log: list[tuple[str | None, list[str]]],
+) -> None:
+    """With the option on, a repeated sentence and tool talk are still skipped."""
+    await set_options(hass, setup_entry, {CONF_SPEAK_EVERY_TOOL: True})
+    stream = hermes.stream()
+    stream.push(
+        ToolStarted("search", "Looking for song A."),
+        ToolStarted("search", "Not found, trying another source."),
+        ToolStarted("search", "Not found, trying another source."),
+        ToolStarted("play", "Calling play_media."),
+        ToolStarted("play"),
+        "Playing song A.",
+    )
+    stream.finish()
+
+    result = await converse(hass, "Play song A")
+
+    assert speech(result) == "Playing song A."
+    assert assistant_log == [
+        (
+            "Looking for song A. Not found, trying another source. ",
+            ["search", "search", "search", "play", "play"],
+        ),
+        ("Playing song A.", []),
+    ]
+
+
+async def test_silent_first_tool_then_a_sentence_is_said_when_asked(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    assistant_log: list[tuple[str | None, list[str]]],
+) -> None:
+    await set_options(hass, setup_entry, {CONF_SPEAK_EVERY_TOOL: True})
+    stream = hermes.stream()
+    stream.push(
+        ToolStarted("search"),
+        ToolStarted("search", "Trying another source."),
+        "Playing song A.",
+    )
+    stream.finish()
+
+    await converse(hass, "Play song A")
+
+    assert assistant_log == [
+        ("Trying another source. ", ["search"]),
+        ("Playing song A.", []),
+    ]
+
+
+async def test_handoff_time_counts_from_the_last_spoken_sentence(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    assistant_log: list[tuple[str | None, list[str]]],
+) -> None:
+    """Hand off after 0.4 s; sentences at 0.2 s and 0.5 s move it to 0.9 s."""
+    await set_options(
+        hass, setup_entry, {CONF_HANDOFF_AFTER: 0.4, CONF_SPEAK_EVERY_TOOL: True}
+    )
+    stream = hermes.stream()
+
+    def answer() -> None:
+        stream.push("Done.")
+        stream.finish()
+
+    hass.loop.call_later(0.2, stream.push, ToolStarted("search", "Looking."))
+    hass.loop.call_later(
+        0.5, stream.push, ToolStarted("search", "Trying another source.")
+    )
+    hass.loop.call_later(0.8, answer)
+    result = await converse(hass, "Play song A")
+
+    assert speech(result) == "Done."
+    assert [text for text, _ in assistant_log] == [
+        "Looking. Trying another source. ",
+        "Done.",
+    ]
+
+
 @pytest.mark.parametrize(
     ("text", "said"),
     [
@@ -682,6 +767,51 @@ async def test_long_text_before_a_tool(
 
     expected = [] if said is None else [(said, ["calendar"])]
     assert assistant_log == [*expected, ("You are free.", [])]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Calling search_music now.",
+        "Checking light.kitchen.",
+        'Searching with {"query": "A"}.',
+        'Searching for "song A".',
+        "Searching for “song A”.",
+        "Running `search`.",
+        "Let me use the tool.",
+        "Để tao dùng công cụ tìm.",
+        "Calling the function.",
+        "Querying the API.",
+        "Running a query.",
+    ],
+    ids=[
+        "snake_case",
+        "dotted",
+        "json",
+        "quoted",
+        "curly quoted",
+        "backticks",
+        "tool",
+        "cong cu",
+        "function",
+        "api",
+        "query",
+    ],
+)
+async def test_tool_talk_before_a_tool_is_not_said(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    assistant_log: list[tuple[str | None, list[str]]],
+    text: str,
+) -> None:
+    stream = hermes.stream()
+    stream.push(ToolStarted("search", text), "Found it.")
+    stream.finish()
+
+    await converse(hass, "Find song A")
+
+    assert assistant_log == [("Found it.", [])]
 
 
 async def test_answer_without_tools_has_no_progress_sentence(
@@ -745,12 +875,16 @@ async def test_silent_tool_keeps_the_handoff_time(
     await hass.async_block_till_done(wait_background_tasks=True)
 
 
+@pytest.mark.parametrize("speak_every_tool", [False, True], ids=["first", "every"])
 async def test_handoff_after_the_progress_sentence(
     hass: HomeAssistant,
     handoff_entry: MockConfigEntry,
     hermes: FakeHermes,
     assistant_log: list[tuple[str | None, list[str]]],
+    speak_every_tool: bool,
 ) -> None:
+    """Nothing is said after the hand-off; the answer is delivered later."""
+    await set_options(hass, handoff_entry, {CONF_SPEAK_EVERY_TOOL: speak_every_tool})
     calls = satellite(hass, ANNOUNCE)
     stream = hermes.stream()
     stream.push(ToolStarted("backup", "Để mình sao lưu."))
@@ -763,6 +897,7 @@ async def test_handoff_after_the_progress_sentence(
     stream.finish()
     await hass.async_block_till_done(wait_background_tasks=True)
 
+    assert [text for text, _ in assistant_log] == ["Để mình sao lưu. ", HANDOFF_MESSAGE]
     assert [call.data for call in calls["announce"]] == [
         {"entity_id": SATELLITE, "message": "Backup done."}
     ]

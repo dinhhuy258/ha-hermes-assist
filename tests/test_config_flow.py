@@ -37,6 +37,7 @@ from custom_components.hermes_assist.const import (
     CONF_SESSION_IDLE_TIMEOUT,
     CONF_SESSION_KEY,
     CONF_SESSION_MODE,
+    CONF_SPEAK_EVERY_TOOL,
     CONF_TIMEOUT,
     CONF_URL,
     DEFAULT_MESSAGES,
@@ -375,6 +376,7 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
             CONF_HANDOFF_AFTER: 10,
             CONF_TIMEOUT: 300,
             CONF_LIST_EXPOSED_ENTITIES: True,
+            CONF_SPEAK_EVERY_TOOL: True,
             CONF_REASONING_EFFORT: "high",
             CONF_MESSAGES: {CONF_MESSAGE_HANDOFF: " Đang làm, xong sẽ báo lại. "},
         },
@@ -392,6 +394,7 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
         CONF_HANDOFF_AFTER: 10,
         CONF_TIMEOUT: 300,
         CONF_LIST_EXPOSED_ENTITIES: True,
+        CONF_SPEAK_EVERY_TOOL: True,
         CONF_REASONING_EFFORT: "high",
         CONF_MESSAGES: {
             **dict.fromkeys(DEFAULT_MESSAGES, ""),
@@ -428,6 +431,7 @@ async def test_add_agent_stores_cleared_text_fields_as_empty(
     assert result["data"][CONF_SESSION_KEY] == ""
     assert result["data"][CONF_MESSAGES] == dict.fromkeys(DEFAULT_MESSAGES, "")
     assert result["data"][CONF_LIST_EXPOSED_ENTITIES] is False
+    assert result["data"][CONF_SPEAK_EVERY_TOOL] is False
     assert result["data"][CONF_REASONING_EFFORT] == ""
 
 

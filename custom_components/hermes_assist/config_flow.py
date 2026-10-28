@@ -43,6 +43,7 @@ from .const import (
     CONF_SESSION_IDLE_TIMEOUT,
     CONF_SESSION_KEY,
     CONF_SESSION_MODE,
+    CONF_SPEAK_EVERY_TOOL,
     CONF_TIMEOUT,
     CONF_URL,
     DEFAULT_MESSAGES,
@@ -125,6 +126,7 @@ def agent_schema(models: list[str]) -> vol.Schema:
                 MIN_TIMEOUT, MAX_TIMEOUT, TIMEOUT_STEP
             ),
             vol.Optional(CONF_LIST_EXPOSED_ENTITIES): BooleanSelector(),
+            vol.Optional(CONF_SPEAK_EVERY_TOOL): BooleanSelector(),
             vol.Optional(CONF_REASONING_EFFORT): SelectSelector(
                 SelectSelectorConfig(
                     options=REASONING_EFFORTS,
@@ -177,6 +179,7 @@ def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_LIST_EXPOSED_ENTITIES: bool(
             user_input.get(CONF_LIST_EXPOSED_ENTITIES, False)
         ),
+        CONF_SPEAK_EVERY_TOOL: bool(user_input.get(CONF_SPEAK_EVERY_TOOL, False)),
         CONF_REASONING_EFFORT: user_input.get(CONF_REASONING_EFFORT) or "",
         CONF_MESSAGES: {
             key: user_input.get(CONF_MESSAGES, {}).get(key, "").strip()
