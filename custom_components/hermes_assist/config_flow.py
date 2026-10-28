@@ -43,7 +43,6 @@ from .const import (
     CONF_SESSION_IDLE_TIMEOUT,
     CONF_SESSION_KEY,
     CONF_SESSION_MODE,
-    CONF_SPEAK_PROGRESS,
     CONF_TIMEOUT,
     CONF_URL,
     DEFAULT_MESSAGES,
@@ -122,7 +121,6 @@ def agent_schema(models: list[str]) -> vol.Schema:
             vol.Required(CONF_HANDOFF_AFTER): _seconds(
                 MIN_HANDOFF_AFTER, MAX_HANDOFF_AFTER
             ),
-            vol.Optional(CONF_SPEAK_PROGRESS): BooleanSelector(),
             vol.Required(CONF_TIMEOUT): _seconds(
                 MIN_TIMEOUT, MAX_TIMEOUT, TIMEOUT_STEP
             ),
@@ -175,7 +173,6 @@ def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_SESSION_MODE: user_input[CONF_SESSION_MODE],
         CONF_SESSION_IDLE_TIMEOUT: int(user_input[CONF_SESSION_IDLE_TIMEOUT]),
         CONF_HANDOFF_AFTER: int(user_input[CONF_HANDOFF_AFTER]),
-        CONF_SPEAK_PROGRESS: bool(user_input.get(CONF_SPEAK_PROGRESS, False)),
         CONF_TIMEOUT: int(user_input[CONF_TIMEOUT]),
         CONF_LIST_EXPOSED_ENTITIES: bool(
             user_input.get(CONF_LIST_EXPOSED_ENTITIES, False)
@@ -192,7 +189,7 @@ class HermesAssistConfigFlow(ConfigFlow, domain=DOMAIN):
     """Set up a Hermes Agent API server."""
 
     VERSION = 2
-    MINOR_VERSION = 2
+    MINOR_VERSION = 3
 
     @classmethod
     @callback

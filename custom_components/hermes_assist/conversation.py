@@ -39,17 +39,14 @@ from .const import (
     CONF_HANDOFF_AFTER,
     CONF_MESSAGE_GENERIC,
     CONF_MESSAGE_HANDOFF,
-    CONF_MESSAGE_PROGRESS,
     CONF_MESSAGES,
     CONF_MODEL,
     CONF_REASONING_EFFORT,
     CONF_SESSION_KEY,
-    CONF_SPEAK_PROGRESS,
     CONF_TIMEOUT,
     DEFAULT_HANDOFF_AFTER,
     DEFAULT_MESSAGES,
     DEFAULT_SESSION_KEY,
-    DEFAULT_SPEAK_PROGRESS,
     DEFAULT_TIMEOUT,
     DOMAIN,
     NAME,
@@ -71,6 +68,9 @@ _LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 _LINE_MARKUP = re.compile(r"^[ \t]*(?:#{1,6}[ \t]*|>[ \t]*|[-*+][ \t]+)", re.MULTILINE)
 _INLINE_MARKUP = re.compile(r"[*`]")
 _WORD_UNDERSCORE = re.compile(r"(?<=[^\W_])_+(?=[^\W_])")
+_SENTENCE_END = re.compile(r"(?<=[.!?\u2026])\s")
+# Longer text before a tool is narration, not a progress sentence.
+_MAX_PROGRESS_LENGTH = 120
 
 
 async def async_setup_entry(
@@ -112,6 +112,19 @@ def _speakable(text: str) -> str:
     """Turn a complete answer into plain text for text to speech."""
     text = _LINK.sub(r"\1", text)
     return " ".join(_SymbolStripper()(text).split())
+
+
+def _progress_sentence(text: str) -> str:
+    """Return the short sentence to say from the text Hermes wrote before a tool.
+
+    The whole text when it is short, else its first sentence when that is
+    short, else nothing.
+    """
+    text = _speakable(text)
+    if len(text) <= _MAX_PROGRESS_LENGTH:
+        return text
+    first = _SENTENCE_END.split(text, maxsplit=1)[0]
+    return first if len(first) <= _MAX_PROGRESS_LENGTH else ""
 
 
 def _same_language(first: str | None, second: str | None) -> bool:
@@ -226,7 +239,11 @@ class HermesAssistEntity(
         try:
             try:
                 async with asyncio.timeout(handoff_after or None):
-                    first = await queue.get()
+                    # A tool with nothing to say before it keeps the wait going.
+                    while isinstance(first := await queue.get(), ToolStarted) and not (
+                        progress := _progress_sentence(first.text)
+                    ):
+                        pass
             except TimeoutError:
                 hand_off()
                 return self._reply(
@@ -236,7 +253,13 @@ class HermesAssistEntity(
                 return self._error(user_input, chat_log, self._error_message(first))
             if isinstance(first, ToolStarted):
                 await self._async_stream_progress(
-                    user_input, chat_log, first, queue, handoff_after, hand_off
+                    user_input,
+                    chat_log,
+                    first,
+                    progress,
+                    queue,
+                    handoff_after,
+                    hand_off,
                 )
             elif isinstance(first, str):
                 await self._async_stream(user_input, chat_log, first, queue)
@@ -296,12 +319,8 @@ class HermesAssistEntity(
         conversation_id: str,
         queue: asyncio.Queue[object],
     ) -> None:
-        """Read the Hermes stream into the queue, ending with _DONE or an error.
-
-        Tool starts are queued only when the agent says a progress message.
-        """
+        """Read the Hermes stream into the queue, ending with _DONE or an error."""
         options = self._options
-        speak_progress = options.get(CONF_SPEAK_PROGRESS, DEFAULT_SPEAK_PROGRESS)
         try:
             async with self.entry.runtime_data.client.stream_chat(
                 messages,
@@ -313,8 +332,7 @@ class HermesAssistEntity(
             ) as stream:
                 self._remember_session(conversation_id, stream.session_id)
                 async for item in stream.items():
-                    if speak_progress or isinstance(item, str):
-                        queue.put_nowait(item)
+                    queue.put_nowait(item)
         except HermesError as err:
             queue.put_nowait(err)
         except Exception as err:
@@ -366,16 +384,18 @@ class HermesAssistEntity(
         user_input: conversation.ConversationInput,
         chat_log: conversation.ChatLog,
         first: ToolStarted,
+        progress: str,
         queue: asyncio.Queue[object],
         handoff_after: float,
         hand_off: Callable[[], None],
     ) -> None:
-        """Say the progress message at the first tool, then the answer.
+        """Say what Hermes wrote before its tool, then the answer.
 
         Text followed by a tool call makes the pipeline start text to speech
         at once instead of waiting for the answer. The hand-off time counts
-        from the progress message, so the hand-off message is said only when
-        Hermes is still working handoff_after seconds later.
+        from the progress sentence, so the hand-off message is said only when
+        Hermes is still working handoff_after seconds later. Text before later
+        tools is not said.
         """
         strip = _SymbolStripper()
         handoff_at = self.hass.loop.time() + handoff_after if handoff_after else None
@@ -383,7 +403,7 @@ class HermesAssistEntity(
         async def deltas() -> AsyncGenerator[conversation.AssistantContentDeltaDict]:
             yield {"role": "assistant"}
             # The space keeps the next sentence apart when the pipeline joins them.
-            yield {"content": f"{self._message(CONF_MESSAGE_PROGRESS)} "}
+            yield {"content": f"{progress} "}
             yield {"tool_calls": [_tool_input(first)]}
             answered = False
             while True:
@@ -391,7 +411,7 @@ class HermesAssistEntity(
                     async with asyncio.timeout_at(None if answered else handoff_at):
                         item = await queue.get()
                 except TimeoutError:
-                    _LOGGER.debug("Hermes is still working after the progress message")
+                    _LOGGER.debug("Hermes is still working after the progress sentence")
                     hand_off()
                     yield {"role": "assistant"}
                     yield {"content": self._message(CONF_MESSAGE_HANDOFF)}

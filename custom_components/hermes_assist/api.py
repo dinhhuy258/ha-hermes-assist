@@ -86,13 +86,14 @@ async def _iter_sse(content: AsyncIterable[bytes]) -> AsyncIterator[tuple[str, s
 
 @dataclass(frozen=True, slots=True)
 class ToolStarted:
-    """Hermes started running a tool."""
+    """Hermes started running a tool; text is what it wrote just before."""
 
     name: str
+    text: str = ""
 
 
-def _started_tool(data: str) -> ToolStarted | None:
-    """Return the tool that a tool progress event reports as started, if any."""
+def _started_tool(data: str) -> str | None:
+    """Return the name of the tool that a tool progress event reports as started."""
     try:
         progress = json.loads(data)
     except ValueError:
@@ -100,7 +101,7 @@ def _started_tool(data: str) -> ToolStarted | None:
     if not isinstance(progress, dict) or progress.get("status") != "running":
         return None
     name = progress.get("tool")
-    return ToolStarted(name if isinstance(name, str) and name else "tool")
+    return name if isinstance(name, str) and name else "tool"
 
 
 class HermesStream:
@@ -124,17 +125,19 @@ class HermesStream:
         """Yield each tool start as it happens and the answer once the stream ends.
 
         The answer is the text after the last tool call. Text before a tool
-        call describes the work in progress, so it is dropped. Any text can
-        still be followed by a tool call, so no text is yielded before the end.
+        call describes the work in progress, so it comes with the tool start
+        instead of the answer. Any text can still be followed by a tool call,
+        so no answer text is yielded before the end.
         """
         parts: list[str] = []
         try:
             async with aclosing(_iter_sse(self._response.content)) as events:
                 async for event, data in events:
                     if event == EVENT_TOOL_PROGRESS:
-                        if (tool := _started_tool(data)) is not None:
+                        if (name := _started_tool(data)) is not None:
+                            text = "".join(parts).strip()
                             parts.clear()
-                            yield tool
+                            yield ToolStarted(name, text)
                         continue
                     if event != "message":
                         # hermes.status, approval.request.

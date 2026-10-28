@@ -21,6 +21,7 @@ from .const import (
     CONF_API_KEY,
     CONF_LIST_EXPOSED_ENTITIES,
     CONF_MESSAGES,
+    CONF_PROMPT,
     CONF_SESSION_IDLE_TIMEOUT,
     CONF_SESSION_MODE,
     CONF_URL,
@@ -31,6 +32,7 @@ from .const import (
     SUBENTRY_TYPE_CONVERSATION,
 )
 from .context import exposed_entities_cache
+from .prompts import OLD_TOOL_SENTENCE, TOOL_SENTENCE
 from .services import async_setup_services
 from .session import SessionStore, async_move_sessions, async_remove_sessions
 
@@ -147,6 +149,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     its entity id and its Hermes session.
     2.1 -> 2.2: the exposed_entities option is renamed list_exposed_entities
     and the removed reset phrases and per-error messages are dropped.
+    2.2 -> 2.3: a prompt that tells Hermes to stay silent before a tool asks
+    for one short sentence instead, which the satellite says while Hermes works.
 
     Home Assistant refuses a version newer than the config flow before
     calling this.
@@ -205,4 +209,18 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 }
             hass.config_entries.async_update_subentry(entry, subentry, data=data)
         hass.config_entries.async_update_entry(entry, minor_version=2)
+
+    if entry.version == 2 and entry.minor_version < 3:
+        for subentry in conversation_subentries(entry):
+            prompt = subentry.data.get(CONF_PROMPT)
+            if isinstance(prompt, str) and OLD_TOOL_SENTENCE in prompt:
+                hass.config_entries.async_update_subentry(
+                    entry,
+                    subentry,
+                    data={
+                        **subentry.data,
+                        CONF_PROMPT: prompt.replace(OLD_TOOL_SENTENCE, TOOL_SENTENCE),
+                    },
+                )
+        hass.config_entries.async_update_entry(entry, minor_version=3)
     return True

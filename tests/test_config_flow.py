@@ -43,7 +43,6 @@ from custom_components.hermes_assist.const import (
     CONF_SESSION_IDLE_TIMEOUT,
     CONF_SESSION_KEY,
     CONF_SESSION_MODE,
-    CONF_SPEAK_PROGRESS,
     CONF_TIMEOUT,
     CONF_URL,
     DEFAULT_MESSAGES,
@@ -55,6 +54,7 @@ from custom_components.hermes_assist.const import (
     SESSION_MODES,
     SUBENTRY_TYPE_CONVERSATION,
 )
+from custom_components.hermes_assist.prompts import OLD_TOOL_SENTENCE, TOOL_SENTENCE
 from custom_components.hermes_assist.session import storage_key
 
 from .conftest import (
@@ -492,13 +492,40 @@ async def test_migrates_minor_version_1_option_names(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
     first = entry.subentries[SUBENTRY_ID].data
     assert first[CONF_LIST_EXPOSED_ENTITIES] is True
     assert "exposed_entities" not in first
     assert "reset_phrases" not in first
     assert first[CONF_MESSAGES] == DEFAULT_MESSAGES
     assert entry.subentries["agent-2"].data[CONF_LIST_EXPOSED_ENTITIES] is False
+
+
+async def test_migrates_the_silent_tool_sentence_of_the_prompt(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    aioclient_mock.get(MODELS_URL, json=MODELS_RESPONSE)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=NAME,
+        version=2,
+        minor_version=2,
+        data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
+        subentries_data=[
+            subentry_data(**{CONF_PROMPT: f"Be brief. {OLD_TOOL_SENTENCE}"}),
+            subentry_data("Custom", "agent-2", **{CONF_PROMPT: "Be brief."}),
+        ],
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.minor_version == 3
+    assert entry.subentries[SUBENTRY_ID].data[CONF_PROMPT] == (
+        f"Be brief. {TOOL_SENTENCE}"
+    )
+    assert entry.subentries["agent-2"].data[CONF_PROMPT] == "Be brief."
 
 
 async def test_a_future_version_is_not_migrated(hass: HomeAssistant) -> None:
@@ -539,7 +566,6 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
             CONF_SESSION_MODE: SESSION_MODE_KEEP,
             CONF_SESSION_IDLE_TIMEOUT: 900,
             CONF_HANDOFF_AFTER: 10,
-            CONF_SPEAK_PROGRESS: True,
             CONF_TIMEOUT: 300,
             CONF_LIST_EXPOSED_ENTITIES: True,
             CONF_REASONING_EFFORT: "high",
@@ -557,7 +583,6 @@ async def test_add_agent_creates_an_entity_with_its_own_options(
         CONF_SESSION_MODE: SESSION_MODE_KEEP,
         CONF_SESSION_IDLE_TIMEOUT: 900,
         CONF_HANDOFF_AFTER: 10,
-        CONF_SPEAK_PROGRESS: True,
         CONF_TIMEOUT: 300,
         CONF_LIST_EXPOSED_ENTITIES: True,
         CONF_REASONING_EFFORT: "high",
@@ -597,7 +622,6 @@ async def test_add_agent_stores_cleared_text_fields_as_empty(
     assert result["data"][CONF_MESSAGES] == dict.fromkeys(DEFAULT_MESSAGES, "")
     assert result["data"][CONF_LIST_EXPOSED_ENTITIES] is False
     assert result["data"][CONF_REASONING_EFFORT] == ""
-    assert result["data"][CONF_SPEAK_PROGRESS] is False
 
 
 @pytest.mark.parametrize(

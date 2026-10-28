@@ -47,13 +47,11 @@ from custom_components.hermes_assist.const import (
     CONF_LIST_EXPOSED_ENTITIES,
     CONF_MESSAGE_GENERIC,
     CONF_MESSAGE_HANDOFF,
-    CONF_MESSAGE_PROGRESS,
     CONF_MESSAGES,
     CONF_MODEL,
     CONF_PROMPT,
     CONF_REASONING_EFFORT,
     CONF_SESSION_MODE,
-    CONF_SPEAK_PROGRESS,
     CONF_TIMEOUT,
     DEFAULT_OPTIONS,
     DOMAIN,
@@ -67,7 +65,6 @@ from custom_components.hermes_assist.messages import (
     ERROR_GENERIC,
     ERROR_TOO_LONG,
     HANDOFF_MESSAGE,
-    PROGRESS_MESSAGE,
 )
 from custom_components.hermes_assist.prompts import (
     DEFAULT_PROMPT,
@@ -637,7 +634,7 @@ def assistant_log(
     return added
 
 
-async def test_tool_starts_are_silent_without_progress(
+async def test_tool_without_text_is_silent(
     hass: HomeAssistant,
     setup_entry: MockConfigEntry,
     hermes: FakeHermes,
@@ -653,17 +650,16 @@ async def test_tool_starts_are_silent_without_progress(
     assert assistant_log == [("You have a dentist appointment.", [])]
 
 
-async def test_progress_message_is_said_at_the_first_tool(
+async def test_text_before_the_first_tool_is_said(
     hass: HomeAssistant,
     setup_entry: MockConfigEntry,
     hermes: FakeHermes,
     assistant_log: list[tuple[str | None, list[str]]],
 ) -> None:
-    await set_options(hass, setup_entry, {CONF_SPEAK_PROGRESS: True})
     stream = hermes.stream()
     stream.push(
-        ToolStarted("calendar"),
-        ToolStarted("weather"),
+        ToolStarted("calendar", "**Let me** check your calendar."),
+        ToolStarted("weather", "Now the weather."),
         "**Tomorrow** you have a dentist appointment.",
     )
     stream.finish()
@@ -672,18 +668,43 @@ async def test_progress_message_is_said_at_the_first_tool(
 
     assert speech(result) == "Tomorrow you have a dentist appointment."
     assert assistant_log == [
-        (f"{PROGRESS_MESSAGE} ", ["calendar", "weather"]),
+        ("Let me check your calendar. ", ["calendar", "weather"]),
         ("Tomorrow you have a dentist appointment.", []),
     ]
 
 
-async def test_answer_without_tools_has_no_progress_message(
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        (f"Okay. {'Checking the calendar. ' * 6}", "Okay. "),
+        ("x" * 121, None),
+    ],
+    ids=["first sentence", "too long"],
+)
+async def test_long_text_before_a_tool(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+    assistant_log: list[tuple[str | None, list[str]]],
+    text: str,
+    said: str | None,
+) -> None:
+    stream = hermes.stream()
+    stream.push(ToolStarted("calendar", text), "You are free.")
+    stream.finish()
+
+    await converse(hass, "What's on tomorrow?")
+
+    expected = [] if said is None else [(said, ["calendar"])]
+    assert assistant_log == [*expected, ("You are free.", [])]
+
+
+async def test_answer_without_tools_has_no_progress_sentence(
     hass: HomeAssistant,
     setup_entry: MockConfigEntry,
     hermes: FakeHermes,
     assistant_log: list[tuple[str | None, list[str]]],
 ) -> None:
-    await set_options(hass, setup_entry, {CONF_SPEAK_PROGRESS: True})
     stream = hermes.stream()
     stream.push("Hello.")
     stream.finish()
@@ -694,16 +715,37 @@ async def test_answer_without_tools_has_no_progress_message(
     assert assistant_log == [("Hello.", [])]
 
 
-async def test_handoff_time_counts_from_the_progress_message(
+async def test_handoff_time_counts_from_the_progress_sentence(
     hass: HomeAssistant,
     setup_entry: MockConfigEntry,
     hermes: FakeHermes,
     assistant_log: list[tuple[str | None, list[str]]],
 ) -> None:
-    """Hand off after 0.4 s; the progress message at 0.2 s moves it to 0.6 s."""
-    await set_options(
-        hass, setup_entry, {CONF_SPEAK_PROGRESS: True, CONF_HANDOFF_AFTER: 0.4}
+    """Hand off after 0.4 s; the progress sentence at 0.2 s moves it to 0.6 s."""
+    await set_options(hass, setup_entry, {CONF_HANDOFF_AFTER: 0.4})
+    stream = hermes.stream()
+
+    def answer() -> None:
+        stream.push("Done.")
+        stream.finish()
+
+    hass.loop.call_later(
+        0.2, stream.push, ToolStarted("backup", "Starting the backup.")
     )
+    hass.loop.call_later(0.5, answer)
+    result = await converse(hass, "Run a backup")
+
+    assert speech(result) == "Done."
+    assert [text for text, _ in assistant_log] == ["Starting the backup. ", "Done."]
+
+
+async def test_silent_tool_keeps_the_handoff_time(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hermes: FakeHermes,
+) -> None:
+    """Hand off after 0.4 s; a tool at 0.2 s with nothing to say changes nothing."""
+    await set_options(hass, setup_entry, {CONF_HANDOFF_AFTER: 0.4})
     stream = hermes.stream()
 
     def answer() -> None:
@@ -714,33 +756,25 @@ async def test_handoff_time_counts_from_the_progress_message(
     hass.loop.call_later(0.5, answer)
     result = await converse(hass, "Run a backup")
 
-    assert speech(result) == "Done."
-    assert [text for text, _ in assistant_log] == [f"{PROGRESS_MESSAGE} ", "Done."]
+    assert speech(result) == HANDOFF_MESSAGE
+    await hass.async_block_till_done(wait_background_tasks=True)
 
 
-async def test_handoff_after_the_progress_message(
+async def test_handoff_after_the_progress_sentence(
     hass: HomeAssistant,
     handoff_entry: MockConfigEntry,
     hermes: FakeHermes,
     assistant_log: list[tuple[str | None, list[str]]],
 ) -> None:
     calls = satellite(hass, ANNOUNCE)
-    await set_options(
-        hass,
-        handoff_entry,
-        {
-            CONF_SPEAK_PROGRESS: True,
-            CONF_MESSAGES: {CONF_MESSAGE_PROGRESS: "Đợi chút."},
-        },
-    )
     stream = hermes.stream()
-    stream.push(ToolStarted("backup"))
+    stream.push(ToolStarted("backup", "Để mình sao lưu."))
 
-    result = await converse(hass, "Run a backup", satellite_id=SATELLITE)
+    result = await converse(hass, "Sao lưu đi", satellite_id=SATELLITE)
     assert speech(result) == HANDOFF_MESSAGE
-    assert [text for text, _ in assistant_log] == ["Đợi chút. ", HANDOFF_MESSAGE]
+    assert [text for text, _ in assistant_log] == ["Để mình sao lưu. ", HANDOFF_MESSAGE]
 
-    stream.push(ToolStarted("verify"), "Backup done.")
+    stream.push(ToolStarted("verify", "Now checking."), "Backup done.")
     stream.finish()
     await hass.async_block_till_done(wait_background_tasks=True)
 
@@ -757,7 +791,7 @@ async def test_handoff_after_the_progress_message(
     ],
     ids=["no answer", "error"],
 )
-async def test_failure_after_the_progress_message_is_said(
+async def test_failure_after_the_progress_sentence_is_said(
     hass: HomeAssistant,
     setup_entry: MockConfigEntry,
     hermes: FakeHermes,
@@ -765,9 +799,8 @@ async def test_failure_after_the_progress_message_is_said(
     end: Exception | None,
     log: str,
 ) -> None:
-    await set_options(hass, setup_entry, {CONF_SPEAK_PROGRESS: True})
     stream = hermes.stream()
-    stream.push(ToolStarted("search"))
+    stream.push(ToolStarted("search", "Let me search."))
     if end is None:
         stream.finish()
     else:

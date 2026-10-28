@@ -174,7 +174,11 @@ async def test_stream_items_report_tool_starts(
     async with client.stream_chat(MESSAGES, timeout=30) as stream:
         items = [item async for item in stream.items()]
 
-    assert items == [ToolStarted("calendar"), ToolStarted("tool"), "You are free."]
+    assert items == [
+        ToolStarted("calendar", "Let me check."),
+        ToolStarted("tool"),
+        "You are free.",
+    ]
 
 
 async def test_stream_with_only_tool_narration_yields_nothing(
