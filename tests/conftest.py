@@ -146,6 +146,7 @@ def mock_entry(hass: HomeAssistant) -> MockConfigEntry:
         domain=DOMAIN,
         title=NAME,
         version=2,
+        minor_version=2,
         data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
         subentries_data=[subentry_data()],
     )

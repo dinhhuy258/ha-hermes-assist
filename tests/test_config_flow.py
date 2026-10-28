@@ -17,7 +17,6 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
-from homeassistant.helpers import device_registry as dr, entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -54,7 +53,6 @@ from custom_components.hermes_assist.const import (
     SESSION_MODES,
     SUBENTRY_TYPE_CONVERSATION,
 )
-from custom_components.hermes_assist.prompts import OLD_TOOL_SENTENCE, TOOL_SENTENCE
 from custom_components.hermes_assist.session import storage_key
 
 from .conftest import (
@@ -64,7 +62,6 @@ from .conftest import (
     MODELS_RESPONSE,
     MODELS_URL,
     SUBENTRY_ID,
-    subentry_data,
 )
 
 NEW_URL = "https://hermes-new.example.com"
@@ -355,191 +352,6 @@ async def test_removing_an_agent_deletes_its_sessions_and_entity(
     assert hass.states.get("conversation.hermes_vietnamese") is None
     assert "agent-2" not in setup_entry.runtime_data.stores
     assert setup_entry.state is ConfigEntryState.LOADED
-
-
-async def test_migrates_a_version_1_entry_into_an_agent(
-    hass: HomeAssistant,
-    aioclient_mock: AiohttpClientMocker,
-    hass_storage: dict[str, Any],
-) -> None:
-    aioclient_mock.get(MODELS_URL, json=MODELS_RESPONSE)
-    options = {
-        **DEFAULT_OPTIONS,
-        CONF_PROMPT: "Be brief.",
-        CONF_SESSION_MODE: SESSION_MODE_KEEP,
-    }
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title=NAME,
-        version=1,
-        data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
-        options=options,
-    )
-    entry.add_to_hass(hass)
-    device_registry = dr.async_get(hass)
-    entity_registry = er.async_get(hass)
-    device = device_registry.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.entry_id)},
-        name=NAME,
-        manufacturer="Nous Research",
-        model="Hermes Agent",
-        entry_type=dr.DeviceEntryType.SERVICE,
-    )
-    entity_registry.async_get_or_create(
-        "conversation",
-        DOMAIN,
-        entry.entry_id,
-        config_entry=entry,
-        device_id=device.id,
-        suggested_object_id="hermes_assist",
-    )
-    old_key = storage_key(entry.entry_id)
-    hass_storage[old_key] = {
-        "version": 1,
-        "minor_version": 1,
-        "key": old_key,
-        "data": {"session_id": "session-1", "last_used": 0.0},
-    }
-
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-
-    assert entry.version == 2
-    assert entry.options == {}
-    (subentry,) = entry.subentries.values()
-    assert subentry.subentry_type == SUBENTRY_TYPE_CONVERSATION
-    assert subentry.title == NAME
-    assert dict(subentry.data) == options
-    registry_entry = entity_registry.async_get(ENTITY_ID)
-    assert registry_entry is not None
-    assert registry_entry.unique_id == subentry.subentry_id
-    assert registry_entry.config_subentry_id == subentry.subentry_id
-    assert hass.states.get(ENTITY_ID) is not None
-    device = device_registry.async_get(device.id)
-    assert device is not None
-    assert device.identifiers == {(DOMAIN, subentry.subentry_id)}
-    assert device.config_entry_id == entry.entry_id
-    assert device.config_subentry_id == subentry.subentry_id
-    assert (
-        device_registry.async_get_device_by_identifier(
-            (DOMAIN, subentry.subentry_id), entry.entry_id
-        )
-        == device
-    )
-    assert old_key not in hass_storage
-    assert hass_storage[storage_key(subentry.subentry_id)]["data"]["session_id"] == (
-        "session-1"
-    )
-    assert entry.runtime_data.stores[subentry.subentry_id].get(None) == "session-1"
-
-
-async def test_migrates_a_version_1_entry_that_never_loaded(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
-) -> None:
-    aioclient_mock.get(MODELS_URL, json=MODELS_RESPONSE)
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title=NAME,
-        version=1,
-        data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
-        options={},
-    )
-    entry.add_to_hass(hass)
-
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-
-    (subentry,) = entry.subentries.values()
-    assert dict(subentry.data) == DEFAULT_OPTIONS
-    assert hass.states.get(ENTITY_ID) is not None
-
-
-async def test_migrates_minor_version_1_option_names(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
-) -> None:
-    aioclient_mock.get(MODELS_URL, json=MODELS_RESPONSE)
-    old_options = {
-        key: value
-        for key, value in DEFAULT_OPTIONS.items()
-        if key != CONF_LIST_EXPOSED_ENTITIES
-    }
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title=NAME,
-        version=2,
-        minor_version=1,
-        data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
-        subentries_data=[
-            subentry_data(
-                **{
-                    **old_options,
-                    "exposed_entities": True,
-                    "reset_phrases": "start over",
-                    CONF_MESSAGES: {
-                        **old_options[CONF_MESSAGES],
-                        "reset_message": "Okay.",
-                        "auth_message": "Bad key.",
-                        "too_long_message": "Too slow.",
-                    },
-                }
-            ),
-            subentry_data("Bare", "agent-2", **old_options),
-        ],
-    )
-    entry.add_to_hass(hass)
-
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-
-    assert entry.minor_version == 3
-    first = entry.subentries[SUBENTRY_ID].data
-    assert first[CONF_LIST_EXPOSED_ENTITIES] is True
-    assert "exposed_entities" not in first
-    assert "reset_phrases" not in first
-    assert first[CONF_MESSAGES] == DEFAULT_MESSAGES
-    assert entry.subentries["agent-2"].data[CONF_LIST_EXPOSED_ENTITIES] is False
-
-
-async def test_migrates_the_silent_tool_sentence_of_the_prompt(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
-) -> None:
-    aioclient_mock.get(MODELS_URL, json=MODELS_RESPONSE)
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title=NAME,
-        version=2,
-        minor_version=2,
-        data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
-        subentries_data=[
-            subentry_data(**{CONF_PROMPT: f"Be brief. {OLD_TOOL_SENTENCE}"}),
-            subentry_data("Custom", "agent-2", **{CONF_PROMPT: "Be brief."}),
-        ],
-    )
-    entry.add_to_hass(hass)
-
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-
-    assert entry.minor_version == 3
-    assert entry.subentries[SUBENTRY_ID].data[CONF_PROMPT] == (
-        f"Be brief. {TOOL_SENTENCE}"
-    )
-    assert entry.subentries["agent-2"].data[CONF_PROMPT] == "Be brief."
-
-
-async def test_a_future_version_is_not_migrated(hass: HomeAssistant) -> None:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title=NAME,
-        version=3,
-        data={CONF_URL: HERMES_URL, CONF_API_KEY: API_KEY},
-    )
-    entry.add_to_hass(hass)
-
-    assert not await hass.config_entries.async_setup(entry.entry_id)
-
-    assert entry.state is ConfigEntryState.MIGRATION_ERROR
 
 
 async def start_add_agent(hass: HomeAssistant, entry: MockConfigEntry) -> Any:

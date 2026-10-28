@@ -2,39 +2,29 @@
 
 from dataclasses import dataclass
 import logging
-from types import MappingProxyType
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import (
-    config_validation as cv,
-    device_registry as dr,
-    entity_registry as er,
-)
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
 from .api import HermesAuthError, HermesClient, HermesError
 from .const import (
     CONF_API_KEY,
-    CONF_LIST_EXPOSED_ENTITIES,
-    CONF_MESSAGES,
-    CONF_PROMPT,
     CONF_SESSION_IDLE_TIMEOUT,
     CONF_SESSION_MODE,
     CONF_URL,
-    DEFAULT_OPTIONS,
     DEFAULT_SESSION_IDLE_TIMEOUT,
     DEFAULT_SESSION_MODE,
     DOMAIN,
     SUBENTRY_TYPE_CONVERSATION,
 )
 from .context import exposed_entities_cache
-from .prompts import OLD_TOOL_SENTENCE, TOOL_SENTENCE
 from .services import async_setup_services
-from .session import SessionStore, async_move_sessions, async_remove_sessions
+from .session import SessionStore, async_remove_sessions
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -129,98 +119,3 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Delete the stored sessions of a removed entry."""
     for subentry in conversation_subentries(entry):
         await async_remove_sessions(hass, subentry.subentry_id)
-
-
-# Spoken messages that version 2.1 stored and 2.2 no longer has.
-_REMOVED_MESSAGES = {
-    "reset_message",
-    "cannot_connect_message",
-    "auth_message",
-    "empty_message",
-    "too_long_message",
-}
-
-
-async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Bring an older entry up to the current version.
-
-    1 -> 2: the options move into a conversation subentry. The entity, its
-    device and its session file follow the subentry so that the agent keeps
-    its entity id and its Hermes session.
-    2.1 -> 2.2: the exposed_entities option is renamed list_exposed_entities
-    and the removed reset phrases and per-error messages are dropped.
-    2.2 -> 2.3: a prompt that tells Hermes to stay silent before a tool asks
-    for one short sentence instead, which the satellite says while Hermes works.
-
-    Home Assistant refuses a version newer than the config flow before
-    calling this.
-    """
-    if entry.version == 1:
-        subentry = ConfigSubentry(
-            data=MappingProxyType({**DEFAULT_OPTIONS, **entry.options}),
-            subentry_type=SUBENTRY_TYPE_CONVERSATION,
-            title=entry.title,
-            unique_id=None,
-        )
-        hass.config_entries.async_add_subentry(entry, subentry)
-
-        entity_registry = er.async_get(hass)
-        entity_id = entity_registry.async_get_entity_id(
-            Platform.CONVERSATION, DOMAIN, entry.entry_id
-        )
-        if entity_id is not None:
-            entity_registry.async_update_entity(
-                entity_id,
-                config_subentry_id=subentry.subentry_id,
-                new_unique_id=subentry.subentry_id,
-            )
-
-        device_registry = dr.async_get(hass)
-        device = device_registry.async_get_device_by_identifier(
-            (DOMAIN, entry.entry_id), entry.entry_id
-        )
-        if device is not None:
-            device_registry.async_update_device(
-                device.id,
-                new_identifiers={(DOMAIN, subentry.subentry_id)},
-                new_config_subentry_id=subentry.subentry_id,
-            )
-
-        await async_move_sessions(hass, entry.entry_id, subentry.subentry_id)
-        hass.config_entries.async_update_entry(
-            entry, options={}, version=2, minor_version=1
-        )
-        _LOGGER.info("Migrated the Hermes Assist options into agent %s", entry.title)
-
-    if entry.version == 2 and entry.minor_version < 2:
-        for subentry in conversation_subentries(entry):
-            data = dict(subentry.data)
-            data[CONF_LIST_EXPOSED_ENTITIES] = bool(
-                data.pop(
-                    "exposed_entities", DEFAULT_OPTIONS[CONF_LIST_EXPOSED_ENTITIES]
-                )
-            )
-            data.pop("reset_phrases", None)
-            if isinstance(messages := data.get(CONF_MESSAGES), dict):
-                data[CONF_MESSAGES] = {
-                    key: value
-                    for key, value in messages.items()
-                    if key not in _REMOVED_MESSAGES
-                }
-            hass.config_entries.async_update_subentry(entry, subentry, data=data)
-        hass.config_entries.async_update_entry(entry, minor_version=2)
-
-    if entry.version == 2 and entry.minor_version < 3:
-        for subentry in conversation_subentries(entry):
-            prompt = subentry.data.get(CONF_PROMPT)
-            if isinstance(prompt, str) and OLD_TOOL_SENTENCE in prompt:
-                hass.config_entries.async_update_subentry(
-                    entry,
-                    subentry,
-                    data={
-                        **subentry.data,
-                        CONF_PROMPT: prompt.replace(OLD_TOOL_SENTENCE, TOOL_SENTENCE),
-                    },
-                )
-        hass.config_entries.async_update_entry(entry, minor_version=3)
-    return True

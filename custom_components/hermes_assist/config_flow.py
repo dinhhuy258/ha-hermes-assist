@@ -189,7 +189,7 @@ class HermesAssistConfigFlow(ConfigFlow, domain=DOMAIN):
     """Set up a Hermes Agent API server."""
 
     VERSION = 2
-    MINOR_VERSION = 3
+    MINOR_VERSION = 2
 
     @classmethod
     @callback

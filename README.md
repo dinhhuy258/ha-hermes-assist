@@ -83,7 +83,7 @@ Each agent can replace this sentence under **Spoken messages**.
 When Hermes starts its first tool, the satellite says the sentence Hermes wrote just before it, such as "Let me check your calendar." or "Để mình xem lịch của bạn.", and the hand-off time counts from that sentence instead of from the request.
 With a hand-off time of 15 seconds and a first tool at 5 seconds, the satellite says the sentence at 5 seconds and the hand-off sentence at 20 seconds, only if Hermes is still working then.
 The default prompt asks Hermes for this sentence.
-Updating replaces the earlier default sentence that told Hermes to stay silent before a tool; a custom prompt without that sentence needs a line that asks for one short sentence before the first tool.
+Agents created before this change keep their saved prompt, which tells Hermes not to describe what it is about to do before a tool; replace that line with one that asks for one short sentence before the first tool.
 
 - Only the text before the first tool is said, with markdown removed. Text longer than 120 characters is cut to its first sentence, and nothing is said when that is still longer.
 - Tool names, tool arguments and the progress labels of Hermes are never said.
