@@ -422,8 +422,9 @@ class HermesAssistEntity(
         async def deltas() -> AsyncGenerator[conversation.AssistantContentDeltaDict]:
             nonlocal handoff_at
             yield {"role": "assistant"}
-            # The space keeps the next sentence apart when the pipeline joins them.
-            yield {"content": f"{progress} "}
+            # The blank line makes a streaming TTS such as Piper say the
+            # sentence at once instead of holding it until more text arrives.
+            yield {"content": f"{progress}\n\n"}
             yield {"tool_calls": [_tool_input(first)]}
             spoken = progress
             answered = False
@@ -441,7 +442,7 @@ class HermesAssistEntity(
                     sentence = _progress_sentence(item.text) if speak_every_tool else ""
                     if sentence and sentence != spoken:
                         spoken = sentence
-                        yield {"content": f"{sentence} "}
+                        yield {"content": f"{sentence}\n\n"}
                         if handoff_at is not None:
                             handoff_at = loop.time() + handoff_after
                     yield {"tool_calls": [_tool_input(item)]}

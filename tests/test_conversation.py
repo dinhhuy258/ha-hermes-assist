@@ -654,7 +654,7 @@ async def test_text_before_the_first_tool_is_said(
 
     assert speech(result) == "Tomorrow you have a dentist appointment."
     assert assistant_log == [
-        ("Let me check your calendar. ", ["calendar", "weather"]),
+        ("Let me check your calendar.\n\n", ["calendar", "weather"]),
         ("Tomorrow you have a dentist appointment.", []),
     ]
 
@@ -683,7 +683,7 @@ async def test_text_before_every_tool_is_said_when_asked(
     assert speech(result) == "Playing song A."
     assert assistant_log == [
         (
-            "Looking for song A. Not found, trying another source. ",
+            "Looking for song A.\n\nNot found, trying another source.\n\n",
             ["search", "search", "search", "play", "play"],
         ),
         ("Playing song A.", []),
@@ -708,7 +708,7 @@ async def test_silent_first_tool_then_a_sentence_is_said_when_asked(
     await converse(hass, "Play song A")
 
     assert assistant_log == [
-        ("Trying another source. ", ["search"]),
+        ("Trying another source.\n\n", ["search"]),
         ("Playing song A.", []),
     ]
 
@@ -738,7 +738,7 @@ async def test_handoff_time_counts_from_the_last_spoken_sentence(
 
     assert speech(result) == "Done."
     assert [text for text, _ in assistant_log] == [
-        "Looking. Trying another source. ",
+        "Looking.\n\nTrying another source.\n\n",
         "Done.",
     ]
 
@@ -746,7 +746,7 @@ async def test_handoff_time_counts_from_the_last_spoken_sentence(
 @pytest.mark.parametrize(
     ("text", "said"),
     [
-        (f"Okay. {'Checking the calendar. ' * 6}", "Okay. "),
+        (f"Okay. {'Checking the calendar. ' * 6}", "Okay.\n\n"),
         ("x" * 121, None),
     ],
     ids=["first sentence", "too long"],
@@ -851,7 +851,7 @@ async def test_handoff_time_counts_from_the_progress_sentence(
     result = await converse(hass, "Run a backup")
 
     assert speech(result) == "Done."
-    assert [text for text, _ in assistant_log] == ["Starting the backup. ", "Done."]
+    assert [text for text, _ in assistant_log] == ["Starting the backup.\n\n", "Done."]
 
 
 async def test_silent_tool_keeps_the_handoff_time(
@@ -891,13 +891,19 @@ async def test_handoff_after_the_progress_sentence(
 
     result = await converse(hass, "Sao lưu đi", satellite_id=SATELLITE)
     assert speech(result) == HANDOFF_MESSAGE
-    assert [text for text, _ in assistant_log] == ["Để mình sao lưu. ", HANDOFF_MESSAGE]
+    assert [text for text, _ in assistant_log] == [
+        "Để mình sao lưu.\n\n",
+        HANDOFF_MESSAGE,
+    ]
 
     stream.push(ToolStarted("verify", "Now checking."), "Backup done.")
     stream.finish()
     await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert [text for text, _ in assistant_log] == ["Để mình sao lưu. ", HANDOFF_MESSAGE]
+    assert [text for text, _ in assistant_log] == [
+        "Để mình sao lưu.\n\n",
+        HANDOFF_MESSAGE,
+    ]
     assert [call.data for call in calls["announce"]] == [
         {"entity_id": SATELLITE, "message": "Backup done."}
     ]
